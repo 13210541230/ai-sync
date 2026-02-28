@@ -5,10 +5,10 @@
  */
 
 import type { ToolConfig, ToolKey } from '../types/config'
-import type { MigrateOptions } from '../migrators/types'
 import { execFile, spawn } from 'node:child_process'
-import { readFile, writeFile } from 'node:fs/promises'
-import { platform } from 'node:os'
+import { readFile, unlink, writeFile } from 'node:fs/promises'
+import { platform, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import chalk from 'chalk'
 import { mergeRules } from './rules-merger'
 import { CLAUDE_SPECIFIC_PATTERNS, createReplacements, TOOL_ADAPT_MAP } from './adapt-rules'
@@ -83,7 +83,7 @@ export async function batchAdaptWithAI(
 
   const strDirList = targetDirs.map(d => `  - ${d}`).join('\n')
 
-  const strPrompt = `You are a configuration migration assistant. These directories contain files that have been migrated from Claude Code to ${info.displayName}, with basic path/name replacements already applied.
+  const strInstructions = `You are a configuration migration assistant. These directories contain files that have been migrated from Claude Code to ${info.displayName}, with basic path/name replacements already applied.
 
 Your task: Read ALL markdown files (.md) in these directories (recursively), and perform semantic-level adaptation for ${info.displayName}.
 
@@ -100,10 +100,16 @@ Adaptation rules:
 
 Process each file: read it, identify Claude Code-specific content, apply adaptations, write back.`
 
+  /** 将完整指令写入临时文件，避免 Windows cmd 参数长度限制导致 claude 进入交互模式 */
+  const strTmpFile = join(tmpdir(), `ai-sync-${Date.now()}.md`)
+  await writeFile(strTmpFile, strInstructions, 'utf-8')
+
   try {
     console.log(chalk.cyan(`\n🤖 AI 批量适配中 (${toolKey})，使用 claude yolo 模式...`))
     console.log(chalk.gray(`   目录: ${targetDirs.join(', ')}`))
     console.log(chalk.gray(`   超时: ${AI_BATCH_TIMEOUT_MS / 60000} 分钟`))
+
+    const strPrompt = `Read the file ${strTmpFile} and execute all instructions in it. Do not ask any questions — just process every file as described and exit when done.`
 
     await new Promise<void>((resolve, reject) => {
       const bIsWin = platform() === 'win32'
@@ -151,6 +157,9 @@ Process each file: read it, identify Claude Code-specific content, apply adaptat
     const strMsg = e instanceof Error ? e.message : String(e)
     console.log(chalk.yellow(`⚠ AI 批量适配失败 (${toolKey})，规则引擎结果保留: ${strMsg}`))
     return false
+  }
+  finally {
+    try { await unlink(strTmpFile) } catch {}
   }
 }
 

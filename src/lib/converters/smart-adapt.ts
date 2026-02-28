@@ -80,48 +80,25 @@ export async function batchAdaptWithAI(
   const info = TOOL_ADAPT_MAP[toolKey]
   if (!info || targetDirs.length === 0) return false
 
-  const strDirList = targetDirs.map(d => `  - ${d}`).join('\n')
+  const strDirsCsv = targetDirs.join(', ')
 
-  const strInstructions = `You are a configuration migration assistant. These directories contain files that have been migrated from Claude Code to ${info.displayName}, with basic path/name replacements already applied.
-
-Your task: Read ALL markdown files (.md) in these directories (recursively), and perform semantic-level adaptation for ${info.displayName}.
-
-Target directories:
-${strDirList}
-
-Adaptation rules:
-1. Remove or adapt instructions referencing Claude Code-specific features not available in ${info.displayName} (e.g., MCP tool calls like mcp__xxx, Claude Code slash commands, Claude-specific workflows)
-2. Adapt tool-specific paths, workflows, and commands to match ${info.displayName} conventions
-3. Keep the content structure, formatting, and original language (Chinese/English) intact
-4. If a file is already generic/universal, leave it unchanged
-5. Do NOT add explanations or comments about your changes — just modify the files directly
-6. Use the Edit tool to make targeted changes, preserving unchanged content exactly
-
-Process each file: read it, identify Claude Code-specific content, apply adaptations, write back.`
+  /**
+   * 单行 prompt：避免 Windows cmd /c 截断多行参数
+   * 包含完整指令，无需 stdin/临时文件中转
+   */
+  const strPrompt = `You are a migration assistant. Read ALL .md files recursively in these directories: ${strDirsCsv}. These files were migrated from Claude Code to ${info.displayName} with basic replacements already done. For each file: (1) Use the Read tool to read its content. (2) Remove or adapt Claude Code-specific features not available in ${info.displayName}, such as mcp__xxx tool calls, Claude Code slash commands, and Claude-specific workflows. (3) Adapt paths, workflows, and commands to ${info.displayName} conventions. (4) Keep structure, formatting, and original language intact. (5) If already generic, skip it. (6) Use the Edit tool to apply targeted changes. Process every file now.`
 
   try {
     console.log(chalk.cyan(`\n🤖 AI 批量适配中 (${toolKey})，使用 claude yolo 模式...`))
-    console.log(chalk.gray(`   目录: ${targetDirs.join(', ')}`))
+    console.log(chalk.gray(`   目录: ${strDirsCsv}`))
     console.log(chalk.gray(`   超时: ${AI_BATCH_TIMEOUT_MS / 60000} 分钟`))
 
-    /** 短 -p 前言触发非交互模式，完整指令通过 stdin 管道传入 */
-    const strPreamble = 'Execute the following migration task. Use Read tool to read each file, then Edit tool to modify them. Start immediately, do not ask questions.'
-
     await new Promise<void>((resolve, reject) => {
-      const bIsWin = platform() === 'win32'
-      const strCmd = bIsWin ? 'cmd' : 'claude'
-      const vecArgs = bIsWin
-        ? ['/c', 'claude', '--dangerously-skip-permissions', '-p', strPreamble]
-        : ['--dangerously-skip-permissions', '-p', strPreamble]
-
-      const child = spawn(strCmd, vecArgs, {
+      const child = spawn('claude', ['--dangerously-skip-permissions', '-p', strPrompt], {
+        shell: true,
         env: getCleanEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
       })
-
-      /** 通过 stdin 管道传递完整指令，避免 Windows cmd 参数长度限制 */
-      child.stdin.write(strInstructions)
-      child.stdin.end()
 
       child.stdout.on('data', (data: Buffer) => {
         const str = data.toString().trim()

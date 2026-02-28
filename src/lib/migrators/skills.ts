@@ -47,7 +47,7 @@ export class SkillsMigrator extends BaseMigrator {
     if (!transform)
       return
 
-    const files = await getMarkdownFiles(this.sourceDir)
+    const files = await getMarkdownFiles(this.sourceDir, true)
 
     for (const file of files) {
       const sourcePath = join(this.sourceDir, file)

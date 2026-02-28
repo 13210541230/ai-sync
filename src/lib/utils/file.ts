@@ -128,18 +128,29 @@ export async function copyDirectory(
 }
 
 /**
- * 获取 Markdown 文件列表
+ * 获取 Markdown 文件列表（支持递归）
+ * @param recursive 递归扫描子目录，返回相对路径（如 `react/SKILL.md`）
  */
-export async function getMarkdownFiles(dirPath: string): Promise<string[]> {
+export async function getMarkdownFiles(dirPath: string, recursive = false): Promise<string[]> {
   const files: string[] = []
-  try {
-    const entries = await readdir(dirPath, { withFileTypes: true })
 
+  async function scan(dir: string, prefix: string): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true })
     for (const entry of entries) {
+      const relativePath = prefix
+        ? `${prefix}/${entry.name}`
+        : entry.name
       if (entry.isFile() && (entry.name.endsWith('.md') || entry.name.endsWith('.mdc'))) {
-        files.push(entry.name)
+        files.push(relativePath)
+      }
+      else if (recursive && entry.isDirectory()) {
+        await scan(join(dir, entry.name), relativePath)
       }
     }
+  }
+
+  try {
+    await scan(dirPath, '')
   }
   catch (error) {
     /** 忽略目录不存在的错误 (Ignore directory not found error) */

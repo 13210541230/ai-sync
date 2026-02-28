@@ -143,8 +143,15 @@ async function applyAdaptLayers(
   let result = adaptContent(content, toolKey)
 
   if (bSmart) {
+    console.log(chalk.cyan(`  🤖 AI 适配中 (${configType}→${toolKey})...`))
     const strAiResult = await adaptWithAI(result, toolKey, configType)
-    if (strAiResult) result = strAiResult
+    if (strAiResult) {
+      console.log(chalk.green(`  ✓ AI 适配完成 (${configType}→${toolKey})`))
+      result = strAiResult
+    }
+    else {
+      console.log(chalk.yellow(`  ⚠ AI 适配无输出 (${configType}→${toolKey})，使用规则引擎结果`))
+    }
   }
 
   return result

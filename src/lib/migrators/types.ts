@@ -6,6 +6,8 @@ import type { MigrationError } from '../utils/logger'
 export interface MigrateOptions {
   autoOverwrite: boolean
   sourceDir?: string
+  /** 启用 AI 智能适配 */
+  smart?: boolean
 }
 
 /**

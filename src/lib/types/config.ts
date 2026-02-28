@@ -43,9 +43,9 @@ export interface SkillConfig {
   source?: string
   target?: string | string[]
   /**
-   * 自定义内容转换逻辑 (Custom content transformation logic)
+   * 自定义内容转换逻辑，返回 null 表示跳过该文件
    */
-  transform?: (content: string, fileName: string) => string | Promise<string>
+  transform?: (content: string, fileName: string) => string | null | Promise<string | null>
 }
 
 /**

@@ -61,6 +61,14 @@ export class SkillsMigrator extends BaseMigrator {
       try {
         const content = await readFile(sourcePath, 'utf-8')
         const transformed = await transform(content, file)
+
+        // transform 返回 null 表示跳过该文件（Claude 专属内容）
+        if (transformed === null || transformed === undefined) {
+          this.logger.warn(`⚠ 跳过 Skill: ${file} (${tool}) — Claude 专属内容`)
+          results.skipped++
+          continue
+        }
+
         await ensureDirectoryExists(dirname(targetPath))
         await writeFile(targetPath, transformed, 'utf-8')
         this.reportSuccess(`转换 Skills: ${file} (${tool})`)

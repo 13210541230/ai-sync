@@ -16,7 +16,7 @@
   <a href="./README.en.md">English</a>
 </div>
 
-Automated script to migrate Claude configurations to different AI IDE tools
+Automated script to migrate Claude configurations to different AI IDE tools, with **smart adaptation** (rule engine + AI semantic rewriting)
 
 ## Supported Tools
 
@@ -47,6 +47,8 @@ npm i -g @jl-org/ai-sync
 
 # Interactive execution
 ai-sync
+# Enable smart adaptation (AI semantic rewriting, requires local claude CLI)
+ai-sync --smart
 # View help
 ai-sync --help
 ```
@@ -60,6 +62,7 @@ ai-sync --help
  ◯  IFlow CLI
 
 ? Configure to current project (otherwise global config)? (y/N) n
+? Enable smart adaptation? (AI semantic rewriting for content) (y/N) n
 ? Auto-overwrite existing files? (y/N) y
 
 Starting migration...
@@ -120,10 +123,21 @@ export default defineConfig({
 
 | Configuration Type | Transformation Description |
 |-------------------|---------------------------|
-| **Commands** | Claude → Cursor/OpenCode: Direct copy<br>Claude → Gemini/IFlow: Markdown → TOML automatic conversion |
-| **Skills** | All tools: Direct copy |
-| **Rules** | Cursor → Other tools: .mdc files merged into single Markdown<br>Other tools → Cursor: Do not migrate (Cursor supports auto-detecting ~/.claude/CLAUDE.md) |
+| **Commands** | Claude → Cursor/OpenCode: Direct copy (`--smart`: path/name adaptation + AI rewriting)<br>Claude → Gemini/IFlow: Markdown → TOML automatic conversion |
+| **Skills** | All tools: Direct copy (`--smart`: auto-skip Claude-exclusive Skills, path/name adaptation + AI rewriting) |
+| **Rules** | Cursor → Other tools: .mdc files merged into single Markdown (`--smart`: post-merge adaptation)<br>Other tools → Cursor: Do not migrate (Cursor supports auto-detecting ~/.claude/CLAUDE.md) |
 | **MCP** | Claude → Cursor/OpenCode/Gemini/IFlow: Automatic format conversion |
+
+### Smart Adaptation (`--smart`)
+
+By default, migration only performs file copying and format conversion. With `--smart` enabled, the migration pipeline adds two adaptation layers:
+
+| Layer | Description | Trigger |
+|-------|-------------|---------|
+| **Layer 1: Rule Engine** | Path prefix replacement (`~/.claude/` → `~/.cursor/`, etc.), tool name replacement (`Claude Code` → `Cursor`, etc.), auto-skip Claude-exclusive Skills | Always enabled |
+| **Layer 2: AI Adaptation** | Semantic-level rewriting via local `claude` CLI, removes/adapts features unsupported by target tool | `--smart` mode only |
+
+**Prerequisite**: Layer 2 requires [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed locally. If CLI is not detected, falls back to Layer 1 only with a warning.
 
 ### Path Rules
 

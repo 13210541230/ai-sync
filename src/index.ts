@@ -13,6 +13,7 @@ import { parseArgs } from 'node:util'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { getToolChoiceList, INTERNAL_CONFIG, isConfigTypeSupported } from './lib/config'
+import { applySmartAdaptation, isClaudeCLIAvailable } from './lib/converters/smart-adapt'
 import { loadUserConfig, mergeConfigs } from './lib/customConfig'
 import { AgentsMigrator } from './lib/migrators/agents'
 import { CommandsMigrator } from './lib/migrators/commands'
@@ -44,6 +45,7 @@ function printHelp(): void {
   console.log('  --type <types>         配置类型 (Config types)，逗号分隔（如：commands,skills,rules,mcp,settings）')
   console.log('  -c, --config <path>    指定配置文件 (Specify config file)')
   console.log('  -y, --yes              自动覆盖 (Auto overwrite)')
+  console.log('  --smart                启用智能适配 (Enable smart adaptation via AI)')
   console.log('  -h, --help             显示帮助信息 (Show help)')
   console.log('  --interactive          强制交互模式 (Force interactive mode)（默认）\n')
   console.log('支持的工具 (Supported tools):')
@@ -124,11 +126,21 @@ async function interactiveMode(tools: Record<ToolKey, ToolConfig> = INTERNAL_CON
     },
   ])
 
+  const { smart } = await inquirer.prompt<InteractiveAnswers>([
+    {
+      type: 'confirm',
+      name: 'smart',
+      message: '启用 AI 智能适配？(Enable AI smart adaptation?)',
+      default: false,
+    },
+  ])
+
   return {
     tools: selectedTools,
     configTypes: selectedTypes,
     autoOverwrite: overwrite,
     sourceDir,
+    smart,
   }
 }
 
@@ -143,6 +155,7 @@ async function parseCommandLineArgs(): Promise<CommandLineOptions | null> {
       type: { type: 'string' },
       config: { type: 'string', short: 'c' },
       yes: { type: 'boolean', short: 'y' },
+      smart: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
       interactive: { type: 'boolean' },
     },
@@ -181,6 +194,7 @@ async function parseCommandLineArgs(): Promise<CommandLineOptions | null> {
     autoOverwrite,
     sourceDir,
     config,
+    smart: values.smart || false,
   }
 }
 
@@ -202,6 +216,18 @@ async function main(): Promise<void> {
   if (options === null) {
     options = (await interactiveMode(toolsConfig)) as CommandLineOptions
   }
+
+  /** 检测 --smart 模式下 claude CLI 可用性 */
+  if (options.smart) {
+    const bAvailable = await isClaudeCLIAvailable()
+    if (!bAvailable) {
+      console.log(chalk.yellow('⚠ claude CLI 不可用，AI 适配已禁用，仅使用规则引擎'))
+      options.smart = false
+    }
+  }
+
+  /** 注入智能适配 transform */
+  applySmartAdaptation(toolsConfig, { autoOverwrite: options.autoOverwrite, smart: options.smart })
 
   /** 探测源目录 */
   let sourceDir: string
@@ -318,6 +344,7 @@ interface CommandLineOptions {
   autoOverwrite: boolean
   sourceDir: string | undefined
   config?: string
+  smart?: boolean
 }
 
 /**
@@ -327,5 +354,6 @@ interface InteractiveAnswers {
   tools: ToolKey[]
   configTypes: ConfigType[]
   overwrite: boolean
+  smart: boolean
   sourceDir?: string
 }

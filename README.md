@@ -16,7 +16,7 @@
   <a href="./README.en.md">English</a>
 </div>
 
-自动化将 Claude 配置迁移到不同 AI IDE 工具的脚本
+自动化将 Claude 配置迁移到不同 AI IDE 工具的脚本，支持**智能适配**（规则引擎 + AI 语义改写）
 
 ## 支持的工具
 
@@ -47,6 +47,8 @@ npm i -g @jl-org/ai-sync
 
 # 交互式执行
 ai-sync
+# 启用智能适配（AI 语义改写，需本地安装 claude CLI）
+ai-sync --smart
 # 查看帮助
 ai-sync --help
 ```
@@ -60,6 +62,7 @@ ai-sync --help
  ◯  IFlow CLI
 
 ? 配置到当前项目（否则为全局配置）？ (y/N) n
+? 启用智能适配？（通过 AI 对内容进行语义级改写） (y/N) n
 ? 是否自动覆盖已存在的文件？ (y/N) y
 
 开始迁移...
@@ -120,10 +123,21 @@ export default defineConfig({
 
 | 配置类型 | 转换说明 |
 |---------|--------|
-| **Commands** | Claude → Cursor/OpenCode：直接复制<br>Claude → Gemini/IFlow：Markdown → TOML 自动转换 |
-| **Skills** | 所有工具：直接复制 |
-| **Rules** | Cursor → 其他工具：.mdc 文件合并为单个 Markdown<br>其他工具 → Cursor：不迁移（Cursor 已支持自动检测 ~/.claude/CLAUDE.md） |
+| **Commands** | Claude → Cursor/OpenCode：直接复制（`--smart` 时进行路径/名称适配 + AI 语义改写）<br>Claude → Gemini/IFlow：Markdown → TOML 自动转换 |
+| **Skills** | 所有工具：直接复制（`--smart` 时自动跳过 Claude 专属 Skill，路径/名称适配 + AI 语义改写） |
+| **Rules** | Cursor → 其他工具：.mdc 文件合并为单个 Markdown（`--smart` 时合并后追加适配）<br>其他工具 → Cursor：不迁移（Cursor 已支持自动检测 ~/.claude/CLAUDE.md） |
 | **MCP** | Claude → Cursor/OpenCode/Gemini/IFlow：自动格式转换 |
+
+### 智能适配（`--smart`）
+
+默认迁移仅做文件复制和格式转换。启用 `--smart` 后，迁移管道增加两层适配：
+
+| 层级 | 说明 | 触发条件 |
+|------|------|----------|
+| **Layer 1: 规则引擎** | 路径前缀替换（`~/.claude/` → `~/.cursor/` 等）、工具名替换（`Claude Code` → `Cursor` 等）、Claude 专属 Skill 自动跳过 | 始终启用 |
+| **Layer 2: AI 适配** | 通过本地 `claude` CLI 对内容进行语义级改写，移除/适配目标工具不支持的特性 | 仅 `--smart` 模式 |
+
+**前置条件**：Layer 2 需要本地安装 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)。若未检测到 CLI，将回退到仅 Layer 1 并提示警告。
 
 ### 路径规则
 

@@ -6,9 +6,8 @@
 
 import type { ToolConfig, ToolKey } from '../types/config'
 import { execFile, spawn } from 'node:child_process'
-import { readFile, unlink, writeFile } from 'node:fs/promises'
-import { platform, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { readFile, writeFile } from 'node:fs/promises'
+import { platform } from 'node:os'
 import chalk from 'chalk'
 import { mergeRules } from './rules-merger'
 import { CLAUDE_SPECIFIC_PATTERNS, createReplacements, TOOL_ADAPT_MAP } from './adapt-rules'
@@ -100,28 +99,29 @@ Adaptation rules:
 
 Process each file: read it, identify Claude Code-specific content, apply adaptations, write back.`
 
-  /** 将完整指令写入临时文件，避免 Windows cmd 参数长度限制导致 claude 进入交互模式 */
-  const strTmpFile = join(tmpdir(), `ai-sync-${Date.now()}.md`)
-  await writeFile(strTmpFile, strInstructions, 'utf-8')
-
   try {
     console.log(chalk.cyan(`\n🤖 AI 批量适配中 (${toolKey})，使用 claude yolo 模式...`))
     console.log(chalk.gray(`   目录: ${targetDirs.join(', ')}`))
     console.log(chalk.gray(`   超时: ${AI_BATCH_TIMEOUT_MS / 60000} 分钟`))
 
-    const strPrompt = `Read the file ${strTmpFile} and execute all instructions in it. Do not ask any questions — just process every file as described and exit when done.`
+    /** 短 -p 前言触发非交互模式，完整指令通过 stdin 管道传入 */
+    const strPreamble = 'Execute the following migration task. Use Read tool to read each file, then Edit tool to modify them. Start immediately, do not ask questions.'
 
     await new Promise<void>((resolve, reject) => {
       const bIsWin = platform() === 'win32'
       const strCmd = bIsWin ? 'cmd' : 'claude'
       const vecArgs = bIsWin
-        ? ['/c', 'claude', '--dangerously-skip-permissions', '-p', strPrompt]
-        : ['--dangerously-skip-permissions', '-p', strPrompt]
+        ? ['/c', 'claude', '--dangerously-skip-permissions', '-p', strPreamble]
+        : ['--dangerously-skip-permissions', '-p', strPreamble]
 
       const child = spawn(strCmd, vecArgs, {
         env: getCleanEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
       })
+
+      /** 通过 stdin 管道传递完整指令，避免 Windows cmd 参数长度限制 */
+      child.stdin.write(strInstructions)
+      child.stdin.end()
 
       child.stdout.on('data', (data: Buffer) => {
         const str = data.toString().trim()
@@ -146,8 +146,6 @@ Process each file: read it, identify Claude Code-specific content, apply adaptat
         clearTimeout(timer)
         reject(err)
       })
-
-      child.stdin.end()
     })
 
     console.log(chalk.green(`✓ AI 批量适配完成 (${toolKey})`))
@@ -157,9 +155,6 @@ Process each file: read it, identify Claude Code-specific content, apply adaptat
     const strMsg = e instanceof Error ? e.message : String(e)
     console.log(chalk.yellow(`⚠ AI 批量适配失败 (${toolKey})，规则引擎结果保留: ${strMsg}`))
     return false
-  }
-  finally {
-    try { await unlink(strTmpFile) } catch {}
   }
 }
 

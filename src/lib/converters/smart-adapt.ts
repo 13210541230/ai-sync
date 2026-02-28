@@ -26,10 +26,13 @@ const CLAUDE_SPECIFIC_THRESHOLD = 2
 const CLI_VERSION_TIMEOUT_MS = 5000
 
 /** AI 适配单文件处理超时（毫秒） */
-const AI_ADAPT_TIMEOUT_MS = 30000
+const AI_ADAPT_TIMEOUT_MS = 120000
 
 /** AI 适配最大输出缓冲区（字节） */
 const AI_ADAPT_MAX_BUFFER = 1024 * 1024
+
+/** 标记 AI 适配已报错（避免重复打印警告） */
+const AI_ADAPT_ERROR = '\0__AI_ADAPT_ERROR__'
 
 /**
  * Layer 1: 规则引擎 - 确定性内容适配
@@ -140,7 +143,7 @@ ${content}`
   catch (e) {
     const strMsg = e instanceof Error ? e.message : String(e)
     console.log(chalk.yellow(`  ⚠ AI 适配失败 (${configType}→${toolKey})，回退到规则引擎: ${strMsg}`))
-    return null
+    return AI_ADAPT_ERROR
   }
 }
 
@@ -158,11 +161,11 @@ async function applyAdaptLayers(
   if (bSmart) {
     console.log(chalk.cyan(`  🤖 AI 适配中 (${configType}→${toolKey})...`))
     const strAiResult = await adaptWithAI(result, toolKey, configType)
-    if (strAiResult) {
+    if (strAiResult && strAiResult !== AI_ADAPT_ERROR) {
       console.log(chalk.green(`  ✓ AI 适配完成 (${configType}→${toolKey})`))
       result = strAiResult
     }
-    else {
+    else if (strAiResult !== AI_ADAPT_ERROR) {
       console.log(chalk.yellow(`  ⚠ AI 适配无输出 (${configType}→${toolKey})，使用规则引擎结果`))
     }
   }

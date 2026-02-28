@@ -84,7 +84,7 @@ export async function adaptWithAI(
   const info = TOOL_ADAPT_MAP[toolKey]
   if (!info) return null
 
-  const strPrompt = `You are a configuration migration assistant. The following ${configType} content has already been pre-processed with basic path/name replacements for ${info.displayName}. Your job is to perform semantic-level adaptation:
+  const strFullPrompt = `You are a configuration migration assistant. The following ${configType} content has already been pre-processed with basic path/name replacements for ${info.displayName}. Your job is to perform semantic-level adaptation:
 
 Rules:
 - Remove or adapt instructions that reference Claude Code-specific features not available in ${info.displayName}
@@ -94,19 +94,21 @@ Rules:
 - Do NOT add explanations, just return the adapted content
 - Preserve the original language (Chinese/English)
 
-Content to adapt:`
+Content to adapt:
+
+${content}`
 
   const strTmpFile = join(tmpdir(), `ai-sync-${Date.now()}.txt`)
 
   try {
-    await writeFile(strTmpFile, content, 'utf-8')
+    await writeFile(strTmpFile, strFullPrompt, 'utf-8')
 
     const strResult = await new Promise<string>((resolve, reject) => {
       const bIsWin = platform() === 'win32'
       const strCmd = bIsWin ? 'cmd' : 'claude'
       const vecArgs = bIsWin
-        ? ['/c', 'claude', '--print', '-p', strPrompt, strTmpFile]
-        : ['--print', '-p', strPrompt, strTmpFile]
+        ? ['/c', 'claude', '--print', strTmpFile]
+        : ['--print', strTmpFile]
 
       execFile(strCmd, vecArgs, {
         encoding: 'utf-8',

@@ -13,7 +13,7 @@ import { parseArgs } from 'node:util'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { getToolChoiceList, INTERNAL_CONFIG, isConfigTypeSupported } from './lib/config'
-import { applySmartAdaptation, isClaudeCLIAvailable } from './lib/converters/smart-adapt'
+import { applySmartAdaptation, batchAdaptWithAI, isClaudeCLIAvailable } from './lib/converters/smart-adapt'
 import { loadUserConfig, mergeConfigs } from './lib/customConfig'
 import { AgentsMigrator } from './lib/migrators/agents'
 import { CommandsMigrator } from './lib/migrators/commands'
@@ -30,6 +30,7 @@ import {
   getSettingsSourcePath,
   getSkillsSourcePath,
   resolveSourceDir,
+  resolveTargetPath,
 } from './lib/path'
 import { Logger } from './lib/utils/logger'
 
@@ -226,8 +227,8 @@ async function main(): Promise<void> {
     }
   }
 
-  /** 注入智能适配 transform */
-  applySmartAdaptation(toolsConfig, { autoOverwrite: options.autoOverwrite, smart: options.smart })
+  /** 注入 Layer 1 规则引擎 transform */
+  applySmartAdaptation(toolsConfig)
 
   /** 探测源目录 */
   let sourceDir: string
@@ -323,6 +324,28 @@ async function main(): Promise<void> {
       console.error(chalk.red(errorMessage))
       results.error++
       results.errors.push({ file: configType, error: errorMessage })
+    }
+  }
+
+  /** Layer 2: AI 批量适配（--smart 模式，迁移完成后执行） */
+  if (options.smart) {
+    const aiConfigTypes: ConfigType[] = ['skills', 'agents', 'commands', 'rules']
+    for (const tool of options.tools) {
+      if (tool === 'claude') continue
+
+      const vecDirs: string[] = []
+      for (const ct of aiConfigTypes) {
+        if (!configTypes.includes(ct)) continue
+        if (!isConfigTypeSupported(tool, ct, toolsConfig)) continue
+        try {
+          vecDirs.push(await resolveTargetPath(tool, ct))
+        }
+        catch { /* 忽略不存在的路径 */ }
+      }
+
+      if (vecDirs.length > 0) {
+        await batchAdaptWithAI(tool, vecDirs)
+      }
     }
   }
 

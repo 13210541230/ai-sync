@@ -147,7 +147,7 @@ describe('smart-adapt', () => {
       }
 
       const original = { ...config.claude }
-      applySmartAdaptation(config, { autoOverwrite: false })
+      applySmartAdaptation(config)
 
       // claude 的 skills.transform 不应被修改
       expect(config.claude.skills.transform).toBe(original.skills.transform)
@@ -164,7 +164,7 @@ describe('smart-adapt', () => {
         },
       }
 
-      applySmartAdaptation(config, { autoOverwrite: false })
+      applySmartAdaptation(config)
       expect(config.cursor.skills.transform).toBeDefined()
       expect(typeof config.cursor.skills.transform).toBe('function')
     })
@@ -180,7 +180,7 @@ describe('smart-adapt', () => {
         },
       }
 
-      applySmartAdaptation(config, { autoOverwrite: false })
+      applySmartAdaptation(config)
       expect(config.cursor.commands.transform).toBeDefined()
     })
 
@@ -195,7 +195,7 @@ describe('smart-adapt', () => {
         },
       }
 
-      applySmartAdaptation(config, { autoOverwrite: false })
+      applySmartAdaptation(config)
       expect(config.codex.commands.transform).toBeUndefined()
     })
 
@@ -211,7 +211,7 @@ describe('smart-adapt', () => {
         },
       }
 
-      applySmartAdaptation(config, { autoOverwrite: false })
+      applySmartAdaptation(config)
       expect(config.cursor.rules!.customMerge).toBeDefined()
       expect(config.cursor.rules!.merge).toBe(false)
     })
@@ -227,7 +227,7 @@ describe('smart-adapt', () => {
         },
       }
 
-      applySmartAdaptation(config, { autoOverwrite: false })
+      applySmartAdaptation(config)
 
       const transform = config.cursor.skills.transform!
       const result = await transform('配置在 ~/.claude/ 下', 'test.md')
@@ -245,7 +245,7 @@ describe('smart-adapt', () => {
         },
       }
 
-      applySmartAdaptation(config, { autoOverwrite: false })
+      applySmartAdaptation(config)
 
       const transform = config.cursor.skills.transform!
       const result = await transform(
@@ -272,7 +272,7 @@ describe('smart-adapt', () => {
         },
       }
 
-      applySmartAdaptation(config, { autoOverwrite: false })
+      applySmartAdaptation(config)
 
       const transform = config.cursor.skills.transform!
       const result = await transform('Claude Code 配置', 'test.md')
@@ -293,7 +293,7 @@ describe('smart-adapt', () => {
         },
       }
 
-      applySmartAdaptation(config, { autoOverwrite: false })
+      applySmartAdaptation(config)
 
       const transform = config.gemini.commands.transform!
       const result = await transform('Claude Code 命令', 'test.md')
@@ -312,7 +312,7 @@ describe('smart-adapt', () => {
       }
 
       const originalTransform = config['unknown-tool'].skills.transform
-      applySmartAdaptation(config, { autoOverwrite: false })
+      applySmartAdaptation(config)
       expect(config['unknown-tool'].skills.transform).toBe(originalTransform)
     })
   })

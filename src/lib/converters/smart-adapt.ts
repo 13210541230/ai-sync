@@ -1,7 +1,7 @@
 /**
  * 智能适配层核心
  * Layer 1: 规则引擎（确定性替换）- 默认启用
- * Layer 2: AI 适配（claude CLI 语义改写）- --smart 触发
+ * Layer 2: AI 适配（claude CLI 批量语义改写）- --smart 触发，迁移完成后执行
  */
 
 import type { ToolConfig, ToolKey } from '../types/config'
@@ -25,14 +25,8 @@ const CLAUDE_SPECIFIC_THRESHOLD = 2
 /** CLI 版本检测超时（毫秒） */
 const CLI_VERSION_TIMEOUT_MS = 5000
 
-/** AI 适配单文件处理超时（毫秒） */
-const AI_ADAPT_TIMEOUT_MS = 120000
-
-/** AI 适配最大输出缓冲区（字节） */
-const AI_ADAPT_MAX_BUFFER = 1024 * 1024
-
-/** 标记 AI 适配已报错（避免重复打印警告） */
-const AI_ADAPT_ERROR = '\0__AI_ADAPT_ERROR__'
+/** AI 批量适配超时（毫秒）— 30 分钟 */
+const AI_BATCH_TIMEOUT_MS = 30 * 60 * 1000
 
 /**
  * Layer 1: 规则引擎 - 确定性内容适配
@@ -76,57 +70,70 @@ export function isClaudeCLIAvailable(): Promise<boolean> {
 }
 
 /**
- * Layer 2: AI 适配 - 通过 claude CLI 进行语义级改写
+ * Layer 2: AI 批量适配 - 通过 claude CLI（yolo 模式）批量处理目标目录
+ *
+ * 迁移完成后调用，一次性让 claude 读取所有目标文件并执行语义级适配
  */
-export async function adaptWithAI(
-  content: string,
+export async function batchAdaptWithAI(
   toolKey: ToolKey,
-  configType: string,
-): Promise<string | null> {
+  targetDirs: string[],
+): Promise<boolean> {
   const info = TOOL_ADAPT_MAP[toolKey]
-  if (!info) return null
+  if (!info || targetDirs.length === 0) return false
 
-  const strFullPrompt = `You are a configuration migration assistant. The following ${configType} content has already been pre-processed with basic path/name replacements for ${info.displayName}. Your job is to perform semantic-level adaptation:
+  const strDirList = targetDirs.map(d => `  - ${d}`).join('\n')
 
-Rules:
-- Remove or adapt instructions that reference Claude Code-specific features not available in ${info.displayName}
-- Ensure tool-specific workflows and commands are correctly adapted
-- Keep the content structure and formatting intact
-- If the content is already generic/universal, return it as-is with no changes
-- Do NOT add explanations, just return the adapted content
-- Preserve the original language (Chinese/English)
+  const strPrompt = `You are a configuration migration assistant. These directories contain files that have been migrated from Claude Code to ${info.displayName}, with basic path/name replacements already applied.
 
-Content to adapt:
+Your task: Read ALL markdown files (.md) in these directories (recursively), and perform semantic-level adaptation for ${info.displayName}.
 
-${content}`
+Target directories:
+${strDirList}
+
+Adaptation rules:
+1. Remove or adapt instructions referencing Claude Code-specific features not available in ${info.displayName} (e.g., MCP tool calls like mcp__xxx, Claude Code slash commands, Claude-specific workflows)
+2. Adapt tool-specific paths, workflows, and commands to match ${info.displayName} conventions
+3. Keep the content structure, formatting, and original language (Chinese/English) intact
+4. If a file is already generic/universal, leave it unchanged
+5. Do NOT add explanations or comments about your changes — just modify the files directly
+6. Use the Edit tool to make targeted changes, preserving unchanged content exactly
+
+Process each file: read it, identify Claude Code-specific content, apply adaptations, write back.`
 
   try {
-    const strResult = await new Promise<string>((resolve, reject) => {
+    console.log(chalk.cyan(`\n🤖 AI 批量适配中 (${toolKey})，使用 claude yolo 模式...`))
+    console.log(chalk.gray(`   目录: ${targetDirs.join(', ')}`))
+    console.log(chalk.gray(`   超时: ${AI_BATCH_TIMEOUT_MS / 60000} 分钟`))
+
+    await new Promise<void>((resolve, reject) => {
       const bIsWin = platform() === 'win32'
       const strCmd = bIsWin ? 'cmd' : 'claude'
       const vecArgs = bIsWin
-        ? ['/c', 'claude', '--print']
-        : ['--print']
+        ? ['/c', 'claude', '--dangerously-skip-permissions', '-p', strPrompt]
+        : ['--dangerously-skip-permissions', '-p', strPrompt]
 
       const child = spawn(strCmd, vecArgs, {
         env: getCleanEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
       })
 
-      let strStdout = ''
+      child.stdout.on('data', (data: Buffer) => {
+        const str = data.toString().trim()
+        if (str) console.log(chalk.gray(`   ${str}`))
+      })
+
       let strStderr = ''
-      child.stdout.on('data', (data: Buffer) => { strStdout += data.toString() })
       child.stderr.on('data', (data: Buffer) => { strStderr += data.toString() })
 
       const timer = setTimeout(() => {
         child.kill()
-        reject(new Error(`AI 适配超时 (${AI_ADAPT_TIMEOUT_MS}ms)`))
-      }, AI_ADAPT_TIMEOUT_MS)
+        reject(new Error(`AI 批量适配超时 (${AI_BATCH_TIMEOUT_MS / 60000} 分钟)`))
+      }, AI_BATCH_TIMEOUT_MS)
 
       child.on('close', (code) => {
         clearTimeout(timer)
         if (code !== 0) reject(new Error(strStderr || `Exit code ${code}`))
-        else resolve(strStdout.trim())
+        else resolve()
       })
 
       child.on('error', (err) => {
@@ -134,51 +141,24 @@ ${content}`
         reject(err)
       })
 
-      child.stdin.write(strFullPrompt)
       child.stdin.end()
     })
 
-    return strResult || null
+    console.log(chalk.green(`✓ AI 批量适配完成 (${toolKey})`))
+    return true
   }
   catch (e) {
     const strMsg = e instanceof Error ? e.message : String(e)
-    console.log(chalk.yellow(`  ⚠ AI 适配失败 (${configType}→${toolKey})，回退到规则引擎: ${strMsg}`))
-    return AI_ADAPT_ERROR
+    console.log(chalk.yellow(`⚠ AI 批量适配失败 (${toolKey})，规则引擎结果保留: ${strMsg}`))
+    return false
   }
 }
 
 /**
- * 通用适配管道：Layer 1 规则引擎 + 可选 Layer 2 AI 适配
- */
-async function applyAdaptLayers(
-  content: string,
-  toolKey: ToolKey,
-  bSmart: boolean,
-  configType: string,
-): Promise<string> {
-  let result = adaptContent(content, toolKey)
-
-  if (bSmart) {
-    console.log(chalk.cyan(`  🤖 AI 适配中 (${configType}→${toolKey})...`))
-    const strAiResult = await adaptWithAI(result, toolKey, configType)
-    if (strAiResult && strAiResult !== AI_ADAPT_ERROR) {
-      console.log(chalk.green(`  ✓ AI 适配完成 (${configType}→${toolKey})`))
-      result = strAiResult
-    }
-    else if (strAiResult !== AI_ADAPT_ERROR) {
-      console.log(chalk.yellow(`  ⚠ AI 适配无输出 (${configType}→${toolKey})，使用规则引擎结果`))
-    }
-  }
-
-  return result
-}
-
-/**
- * 创建 Skills 的 smart transform 函数
+ * 创建 Skills 的 smart transform 函数（仅 Layer 1 规则引擎）
  */
 function createSkillsTransform(
   toolKey: ToolKey,
-  bSmart: boolean,
   existingTransform?: (content: string, fileName: string) => string | null | Promise<string | null>,
 ): (content: string, fileName: string) => Promise<string | null> {
   return async (content: string, fileName: string): Promise<string | null> => {
@@ -192,16 +172,15 @@ function createSkillsTransform(
 
     if (result === null) return null
 
-    return applyAdaptLayers(result, toolKey, bSmart, 'skill')
+    return adaptContent(result, toolKey)
   }
 }
 
 /**
- * 创建 Commands 的 smart transform 函数
+ * 创建 Commands 的 smart transform 函数（仅 Layer 1 规则引擎）
  */
 function createCommandsTransform(
   toolKey: ToolKey,
-  bSmart: boolean,
   existingTransform?: (content: string, fileName: string) => string | Promise<string>,
 ): (content: string, fileName: string) => Promise<string> {
   return async (content: string, fileName: string): Promise<string> => {
@@ -209,36 +188,34 @@ function createCommandsTransform(
       ? await existingTransform(content, fileName)
       : content
 
-    return applyAdaptLayers(result, toolKey, bSmart, 'command')
+    return adaptContent(result, toolKey)
   }
 }
 
 /**
- * 创建 Rules 的 customMerge（先 mergeRules 再适配）
+ * 创建 Rules 的 customMerge（先 mergeRules 再 Layer 1 适配）
  */
 function createRulesCustomMerge(
   toolKey: ToolKey,
-  bSmart: boolean,
 ): (sourceDir: string, targetFile: string) => Promise<void> {
   return async (sourceDir: string, targetFile: string): Promise<void> => {
     await mergeRules(sourceDir, targetFile)
 
     const strContent = await readFile(targetFile, 'utf-8')
-    const strAdapted = await applyAdaptLayers(strContent, toolKey, bSmart, 'rules')
+    const strAdapted = adaptContent(strContent, toolKey)
 
     await writeFile(targetFile, strAdapted, 'utf-8')
   }
 }
 
 /**
- * 运行时装饰：为工具配置注入智能适配 transform
+ * 运行时装饰：为工具配置注入 Layer 1 规则引擎 transform
+ *
+ * Layer 2 AI 适配通过 batchAdaptWithAI 在迁移完成后独立执行
  */
 export function applySmartAdaptation(
   toolsConfig: Record<string, ToolConfig>,
-  options: MigrateOptions,
 ): void {
-  const bSmart = options.smart ?? false
-
   for (const [toolKey, config] of Object.entries(toolsConfig)) {
     if (toolKey === 'claude') continue
     if (!TOOL_ADAPT_MAP[toolKey]) continue
@@ -246,18 +223,18 @@ export function applySmartAdaptation(
     // Skills transform
     if (config.skills) {
       const existingTransform = config.skills.transform
-      config.skills.transform = createSkillsTransform(toolKey, bSmart, existingTransform)
+      config.skills.transform = createSkillsTransform(toolKey, existingTransform)
     }
 
     // Commands transform（仅对非 TOML 格式）
     if (config.commands && config.commands.format !== 'toml') {
       const existingTransform = config.commands.transform
-      config.commands.transform = createCommandsTransform(toolKey, bSmart, existingTransform)
+      config.commands.transform = createCommandsTransform(toolKey, existingTransform)
     }
 
     // Rules: 对有 merge: true 的配置注入 customMerge
     if (config.rules?.merge) {
-      config.rules.customMerge = createRulesCustomMerge(toolKey, bSmart)
+      config.rules.customMerge = createRulesCustomMerge(toolKey)
       config.rules.merge = false
     }
   }

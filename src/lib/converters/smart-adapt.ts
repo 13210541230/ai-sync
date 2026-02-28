@@ -6,10 +6,9 @@
 
 import type { ToolConfig, ToolKey } from '../types/config'
 import type { MigrateOptions } from '../migrators/types'
-import { execFile } from 'node:child_process'
-import { readFile, unlink, writeFile } from 'node:fs/promises'
-import { platform, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { execFile, spawn } from 'node:child_process'
+import { readFile, writeFile } from 'node:fs/promises'
+import { platform } from 'node:os'
 import chalk from 'chalk'
 import { mergeRules } from './rules-merger'
 import { CLAUDE_SPECIFIC_PATTERNS, createReplacements, TOOL_ADAPT_MAP } from './adapt-rules'
@@ -98,27 +97,42 @@ Content to adapt:
 
 ${content}`
 
-  const strTmpFile = join(tmpdir(), `ai-sync-${Date.now()}.txt`)
-
   try {
-    await writeFile(strTmpFile, strFullPrompt, 'utf-8')
-
     const strResult = await new Promise<string>((resolve, reject) => {
       const bIsWin = platform() === 'win32'
       const strCmd = bIsWin ? 'cmd' : 'claude'
       const vecArgs = bIsWin
-        ? ['/c', 'claude', '--print', strTmpFile]
-        : ['--print', strTmpFile]
+        ? ['/c', 'claude', '--print']
+        : ['--print']
 
-      execFile(strCmd, vecArgs, {
-        encoding: 'utf-8',
-        timeout: AI_ADAPT_TIMEOUT_MS,
-        maxBuffer: AI_ADAPT_MAX_BUFFER,
+      const child = spawn(strCmd, vecArgs, {
         env: getCleanEnv(),
-      }, (err, stdout) => {
-        if (err) reject(err)
-        else resolve(stdout.trim())
+        stdio: ['pipe', 'pipe', 'pipe'],
       })
+
+      let strStdout = ''
+      let strStderr = ''
+      child.stdout.on('data', (data: Buffer) => { strStdout += data.toString() })
+      child.stderr.on('data', (data: Buffer) => { strStderr += data.toString() })
+
+      const timer = setTimeout(() => {
+        child.kill()
+        reject(new Error(`AI 适配超时 (${AI_ADAPT_TIMEOUT_MS}ms)`))
+      }, AI_ADAPT_TIMEOUT_MS)
+
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        if (code !== 0) reject(new Error(strStderr || `Exit code ${code}`))
+        else resolve(strStdout.trim())
+      })
+
+      child.on('error', (err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+
+      child.stdin.write(strFullPrompt)
+      child.stdin.end()
     })
 
     return strResult || null
@@ -127,9 +141,6 @@ ${content}`
     const strMsg = e instanceof Error ? e.message : String(e)
     console.log(chalk.yellow(`  ⚠ AI 适配失败 (${configType}→${toolKey})，回退到规则引擎: ${strMsg}`))
     return null
-  }
-  finally {
-    await unlink(strTmpFile).catch(() => {})
   }
 }
 

@@ -10,8 +10,15 @@ import { execFile } from 'node:child_process'
 import { readFile, unlink, writeFile } from 'node:fs/promises'
 import { platform, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import chalk from 'chalk'
 import { mergeRules } from './rules-merger'
 import { CLAUDE_SPECIFIC_PATTERNS, createReplacements, TOOL_ADAPT_MAP } from './adapt-rules'
+
+/** 排除嵌套会话检测的环境变量 */
+function getCleanEnv(): NodeJS.ProcessEnv {
+  const { CLAUDECODE, ...env } = process.env
+  return env
+}
 
 /** Claude 专属特征匹配阈值，达到此数量视为 Claude 专属内容 */
 const CLAUDE_SPECIFIC_THRESHOLD = 2
@@ -60,7 +67,7 @@ export function isClaudeCLIAvailable(): Promise<boolean> {
     const strCmd = bIsWin ? 'cmd' : 'claude'
     const vecArgs = bIsWin ? ['/c', 'claude', '--version'] : ['--version']
 
-    execFile(strCmd, vecArgs, { timeout: CLI_VERSION_TIMEOUT_MS }, (err) => {
+    execFile(strCmd, vecArgs, { timeout: CLI_VERSION_TIMEOUT_MS, env: getCleanEnv() }, (err) => {
       resolve(!err)
     })
   })
@@ -105,6 +112,7 @@ Content to adapt:`
         encoding: 'utf-8',
         timeout: AI_ADAPT_TIMEOUT_MS,
         maxBuffer: AI_ADAPT_MAX_BUFFER,
+        env: getCleanEnv(),
       }, (err, stdout) => {
         if (err) reject(err)
         else resolve(stdout.trim())
@@ -113,7 +121,9 @@ Content to adapt:`
 
     return strResult || null
   }
-  catch {
+  catch (e) {
+    const strMsg = e instanceof Error ? e.message : String(e)
+    console.log(chalk.yellow(`  ⚠ AI 适配失败 (${configType}→${toolKey})，回退到规则引擎: ${strMsg}`))
     return null
   }
   finally {

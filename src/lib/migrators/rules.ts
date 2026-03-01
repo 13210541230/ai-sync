@@ -7,6 +7,7 @@ import type { MigrateOptions, MigrationStats } from './types'
 import { readdir, stat } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import { mergeRules } from '../converters/rules-merger'
+import { adaptContent } from '../converters/smart-adapt'
 import { copyDirectory, copyFileSafe, directoryExists, ensureDirectoryExists, fileExists, readFile, writeFile } from '../utils/file'
 import { BaseMigrator } from './base'
 
@@ -207,8 +208,9 @@ export class RulesMigrator extends BaseMigrator {
         const transformed = transform
           ? await transform(content, basename(file.sourcePath))
           : content
+        const adapted = this.adaptProjectRuleContent(transformed, tool)
         await ensureDirectoryExists(dirname(targetFile))
-        await writeFile(targetFile, transformed, 'utf-8')
+        await writeFile(targetFile, adapted, 'utf-8')
         this.reportSuccess(`迁移项目规则文件: ${file.sourcePath} → ${targetFile}`)
         results.success++
       }
@@ -334,6 +336,26 @@ export class RulesMigrator extends BaseMigrator {
 
     const stats = await copyDirectory(sourceDir, targetDir, this.options.autoOverwrite)
     this.sumStats(results, stats)
+  }
+
+  /**
+   * 项目级 rules 内容按目标工具做最小适配
+   */
+  private adaptProjectRuleContent(content: string, tool: ToolKey): string {
+    if (tool === 'codex') {
+      return adaptContent(content, 'codex')
+    }
+
+    if (tool === 'claude') {
+      return content
+        .replace(/~\/\.codex\//g, '~/.claude/')
+        .replace(/\.codex\//g, '.claude/')
+        .replace(/AGENTS\.md/g, 'CLAUDE.md')
+        .replace(/config\.toml/g, '.claude.json')
+        .replace(/\bCodex\b/g, 'Claude Code')
+    }
+
+    return content
   }
 
   /**

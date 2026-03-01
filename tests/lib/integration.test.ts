@@ -230,30 +230,36 @@ describe('集成测试 (全面覆盖)', () => {
     it('应将项目内 CLAUDE.md（含子目录）和项目 rules/skills 迁移到 codex', async () => {
       const projectRoot = join(testTargetDir, 'project-claude')
       await ensureDirectoryExists(join(projectRoot, 'sub'))
+      await ensureDirectoryExists(join(projectRoot, 'module-a', '.claude', 'skills'))
       await ensureDirectoryExists(join(projectRoot, '.claude', 'rules'))
       await ensureDirectoryExists(join(projectRoot, '.claude', 'skills'))
 
       await writeFile(join(projectRoot, 'CLAUDE.md'), '# root claude')
-      await writeFile(join(projectRoot, 'sub', 'CLAUDE.md'), '# sub claude')
+      await writeFile(join(projectRoot, 'sub', 'CLAUDE.md'), '[根目录](../CLAUDE.md)')
       await writeFile(join(projectRoot, '.claude', 'rules', 'strict.mdc'), 'rule content')
       await writeFile(join(projectRoot, '.claude', 'skills', 'project-skill.md'), '# skill')
+      await writeFile(join(projectRoot, 'module-a', '.claude', 'skills', 'nested-skill.md'), '# nested')
 
       const options = { autoOverwrite: true, scope: 'project' as const, sourceDir: projectRoot }
       const rulesMigrator = new RulesMigrator(projectRoot, ['codex'], options, TOOL_CONFIGS)
-      const skillsMigrator = new SkillsMigrator(join(projectRoot, '.claude', 'skills'), ['codex'], options, TOOL_CONFIGS)
+      const skillsMigrator = new SkillsMigrator(projectRoot, ['codex'], options, TOOL_CONFIGS)
 
       await rulesMigrator.migrate()
       await skillsMigrator.migrate()
 
       expect(await fileExists(join(projectRoot, 'AGENTS.md'))).toBe(true)
       expect(await fileExists(join(projectRoot, 'sub', 'AGENTS.md'))).toBe(true)
+      const subAgentsContent = await readFile(join(projectRoot, 'sub', 'AGENTS.md'), 'utf-8')
+      expect(subAgentsContent).toContain('AGENTS.md')
       expect(await fileExists(join(projectRoot, '.codex', 'rules', 'strict.mdc'))).toBe(true)
       expect(await fileExists(join(projectRoot, '.codex', 'skills', 'project-skill.md'))).toBe(true)
+      expect(await fileExists(join(projectRoot, 'module-a', '.codex', 'skills', 'nested-skill.md'))).toBe(true)
     })
 
     it('应将项目内 AGENTS.md（含子目录）和项目 rules/skills 迁移到 claude', async () => {
       const projectRoot = join(testTargetDir, 'project-codex')
       await ensureDirectoryExists(join(projectRoot, 'sub'))
+      await ensureDirectoryExists(join(projectRoot, 'module-b', '.codex', 'skills'))
       await ensureDirectoryExists(join(projectRoot, '.codex', 'rules'))
       await ensureDirectoryExists(join(projectRoot, '.codex', 'skills'))
 
@@ -261,10 +267,11 @@ describe('集成测试 (全面覆盖)', () => {
       await writeFile(join(projectRoot, 'sub', 'AGENTS.md'), '# sub agents')
       await writeFile(join(projectRoot, '.codex', 'rules', 'base.mdc'), 'codex rule')
       await writeFile(join(projectRoot, '.codex', 'skills', 'codex-skill.md'), '# codex skill')
+      await writeFile(join(projectRoot, 'module-b', '.codex', 'skills', 'nested-codex-skill.md'), '# codex nested')
 
       const options = { autoOverwrite: true, scope: 'project' as const, sourceDir: projectRoot }
       const rulesMigrator = new RulesMigrator(projectRoot, ['claude'], options, TOOL_CONFIGS)
-      const skillsMigrator = new SkillsMigrator(join(projectRoot, '.codex', 'skills'), ['claude'], options, TOOL_CONFIGS)
+      const skillsMigrator = new SkillsMigrator(projectRoot, ['claude'], options, TOOL_CONFIGS)
 
       await rulesMigrator.migrate()
       await skillsMigrator.migrate()
@@ -273,6 +280,7 @@ describe('集成测试 (全面覆盖)', () => {
       expect(await fileExists(join(projectRoot, 'sub', 'CLAUDE.md'))).toBe(true)
       expect(await fileExists(join(projectRoot, '.claude', 'rules', 'base.mdc'))).toBe(true)
       expect(await fileExists(join(projectRoot, '.claude', 'skills', 'codex-skill.md'))).toBe(true)
+      expect(await fileExists(join(projectRoot, 'module-b', '.claude', 'skills', 'nested-codex-skill.md'))).toBe(true)
     })
 
     it('当同目录同时存在 CLAUDE.md 和 AGENTS.md 时，应按目标方向优先选反向源文件', async () => {

@@ -4,10 +4,13 @@
 
 import type { ConfigDirType, ConfigType, ToolKey } from './config'
 import { existsSync } from 'node:fs'
+import { readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { DEFAULT_TOOL_CONFIGS } from './configs'
 import { directoryExists, fileExists } from './utils/file'
+
+const PROJECT_SCAN_SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'coverage'])
 
 /**
  * 展开家目录路径
@@ -224,4 +227,91 @@ export async function resolveTargetPathByScope(
   }
 
   return resolveTargetPath(tool, configType)
+}
+
+/**
+ * 收集项目级目标规则文件（递归）
+ */
+export async function collectProjectRuleTargetFiles(
+  sourceDir: string,
+  targetTool: 'claude' | 'codex',
+): Promise<string[]> {
+  const targetFileName = targetTool === 'codex'
+    ? 'AGENTS.md'
+    : 'CLAUDE.md'
+
+  const files: string[] = []
+
+  async function scan(dir: string): Promise<void> {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    }
+    catch {
+      return
+    }
+
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (PROJECT_SCAN_SKIP_DIRS.has(entry.name)) {
+          continue
+        }
+        await scan(fullPath)
+      }
+      else if (entry.isFile() && entry.name === targetFileName) {
+        files.push(fullPath)
+      }
+    }
+  }
+
+  await scan(sourceDir)
+  return files
+}
+
+/**
+ * 收集项目级目标 skills 目录（递归）
+ */
+export async function collectProjectSkillTargetDirs(
+  sourceDir: string,
+  targetTool: 'claude' | 'codex',
+): Promise<string[]> {
+  const targetConfigDir = targetTool === 'codex'
+    ? '.codex'
+    : '.claude'
+  const dirs: string[] = []
+
+  async function scan(dir: string): Promise<void> {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    }
+    catch {
+      return
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue
+      }
+
+      const fullPath = join(dir, entry.name)
+      if (PROJECT_SCAN_SKIP_DIRS.has(entry.name)) {
+        continue
+      }
+
+      if (entry.name === targetConfigDir) {
+        const skillDir = join(fullPath, 'skills')
+        if (await directoryExists(skillDir)) {
+          dirs.push(skillDir)
+        }
+        continue
+      }
+
+      await scan(fullPath)
+    }
+  }
+
+  await scan(sourceDir)
+  return dirs
 }

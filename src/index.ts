@@ -22,11 +22,12 @@ import { RulesMigrator } from './lib/migrators/rules'
 import { SettingsMigrator } from './lib/migrators/settings'
 import { SkillsMigrator } from './lib/migrators/skills'
 import {
+  collectProjectRuleTargetFiles,
+  collectProjectSkillTargetDirs,
   expandHome,
   getAgentsSourcePath,
   getCommandsSourcePath,
   getMCPSourcePath,
-  getProjectSkillsSourcePathByPreference,
   getRuleSourcePath,
   getSettingsSourcePath,
   getSkillsSourcePath,
@@ -361,24 +362,9 @@ async function main(): Promise<void> {
           break
         }
         case 'skills': {
-          if (options.scope === 'project') {
-            for (const scopedTool of supportedTools) {
-              const preferSource = scopedTool === 'claude'
-                ? 'codex'
-                : 'claude'
-              const skillsPath = await getProjectSkillsSourcePathByPreference(sourceDir, preferSource)
-              const scopedMigrator = new SkillsMigrator(skillsPath, [scopedTool], options, toolsConfig)
-              const scopedResults = await scopedMigrator.migrate()
-              results.success += scopedResults.success
-              results.skipped += scopedResults.skipped
-              results.error += scopedResults.error
-              results.errors.push(...scopedResults.errors)
-            }
-            spinner.succeed(chalk.green(`迁移 ${configType} 完成 (Migrated ${configType} successfully)`))
-            continue
-          }
-
-          const skillsPath = await getSkillsSourcePath(sourceDir)
+          const skillsPath = options.scope === 'project'
+            ? sourceDir
+            : await getSkillsSourcePath(sourceDir)
           migrator = new SkillsMigrator(skillsPath, supportedTools, options, toolsConfig)
           break
         }
@@ -437,6 +423,21 @@ async function main(): Promise<void> {
           continue
         if (!isConfigTypeSupported(tool, ct, toolsConfig))
           continue
+
+        if (options.scope === 'project' && ct === 'rules' && (tool === 'claude' || tool === 'codex')) {
+          const projectTool = tool as 'claude' | 'codex'
+          const ruleFiles = await collectProjectRuleTargetFiles(sourceDir, projectTool)
+          vecDirs.push(...ruleFiles)
+          continue
+        }
+
+        if (options.scope === 'project' && ct === 'skills' && (tool === 'claude' || tool === 'codex')) {
+          const projectTool = tool as 'claude' | 'codex'
+          const skillDirs = await collectProjectSkillTargetDirs(sourceDir, projectTool)
+          vecDirs.push(...skillDirs)
+          continue
+        }
+
         try {
           vecDirs.push(await resolveTargetPathByScope(tool, ct, options.scope, sourceDir))
         }

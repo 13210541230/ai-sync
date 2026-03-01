@@ -7,7 +7,7 @@
 import type { SmartProvider, ToolConfig, ToolKey } from '../types/config'
 import type { ToolAdaptInfo } from './adapt-rules'
 import { execFile, spawn } from 'node:child_process'
-import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { platform } from 'node:os'
 import { join } from 'node:path'
 import chalk from 'chalk'
@@ -99,10 +99,18 @@ async function collectMarkdownFiles(dirs: string[]): Promise<string[]> {
   const vecFiles: string[] = []
   for (const dir of dirs) {
     try {
+      const fileStats = await stat(dir)
+      if (fileStats.isFile()) {
+        if (dir.endsWith('.md'))
+          vecFiles.push(dir)
+        continue
+      }
+
       const entries = await readdir(dir, { recursive: true })
       for (const entry of entries) {
-        if (typeof entry === 'string' && entry.endsWith('.md'))
+        if (typeof entry === 'string' && entry.endsWith('.md')) {
           vecFiles.push(join(dir, entry))
+        }
       }
     }
     catch { /* 目录不存在则跳过 */ }
@@ -216,7 +224,9 @@ export async function batchAdaptWithAI(
       try {
         const strContent = await readFile(filePath, 'utf-8')
 
-        if (!CLAUDE_SPECIFIC_PATTERNS.some(p => p.test(strContent))) {
+        const shouldUseAI = provider === 'codex'
+          || CLAUDE_SPECIFIC_PATTERNS.some(p => p.test(strContent))
+        if (!shouldUseAI) {
           nSkipped++
           continue
         }

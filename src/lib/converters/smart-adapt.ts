@@ -7,8 +7,9 @@
 import type { SmartProvider, ToolConfig, ToolKey } from '../types/config'
 import type { ToolAdaptInfo } from './adapt-rules'
 import { execFile, spawn } from 'node:child_process'
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { platform } from 'node:os'
+import { randomUUID } from 'node:crypto'
+import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { platform, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import chalk from 'chalk'
 import { CLAUDE_SPECIFIC_PATTERNS, createReplacements, TOOL_ADAPT_MAP } from './adapt-rules'
@@ -138,7 +139,7 @@ function buildAdaptPrompt(content: string, info: ToolAdaptInfo): string {
   ].join('\n')
 }
 
-/** Windows cmd /c 参数长度安全阈值（字节） */
+/** Windows cmd /c 参数长度安全阈值（字节，仅 claude 参数模式使用） */
 const WIN_CMD_SAFE_LIMIT = 7500
 
 /**
@@ -150,42 +151,79 @@ function adaptSingleFile(
   provider: SmartProvider,
 ): Promise<string | null> {
   const strPrompt = buildAdaptPrompt(content, info)
+  const outputFile = provider === 'codex'
+    ? join(tmpdir(), `ai-sync-codex-${randomUUID()}.txt`)
+    : undefined
 
-  if (platform() === 'win32' && strPrompt.length > WIN_CMD_SAFE_LIMIT) {
+  if (provider === 'claude' && platform() === 'win32' && strPrompt.length > WIN_CMD_SAFE_LIMIT) {
     console.log(chalk.yellow(`   ⚠ 文件过大 (${strPrompt.length} chars)，跳过 AI 适配`))
     return Promise.resolve(null)
   }
 
   return new Promise((resolve) => {
-    const command = PROVIDER_COMMANDS[provider]
-    const args = provider === 'claude'
+    const bIsWin = platform() === 'win32'
+    const providerCommand = PROVIDER_COMMANDS[provider]
+    const providerArgs = provider === 'claude'
       ? ['-p', strPrompt]
-      : ['exec', strPrompt, '--skip-git-repo-check', '--color', 'never']
+      : ['exec', '-', '--skip-git-repo-check', '--color', 'never', '--output-last-message', outputFile!]
+    const command = bIsWin
+      ? 'cmd'
+      : providerCommand
+    const args = bIsWin
+      ? ['/c', providerCommand, ...providerArgs]
+      : providerArgs
 
     const child = spawn(command, args, {
-      shell: true,
+      shell: false,
       env: getCleanEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
     let strOut = ''
+    let bSettled = false
     child.stdout.on('data', (d: Buffer) => { strOut += d.toString() })
+
+    async function cleanupOutputFile(): Promise<void> {
+      if (!outputFile)
+        return
+      await rm(outputFile, { force: true }).catch(() => undefined)
+    }
+
+    async function finalize(result: string | null): Promise<void> {
+      if (bSettled)
+        return
+      bSettled = true
+      clearTimeout(timer)
+      await cleanupOutputFile()
+      resolve(result)
+    }
 
     const timer = setTimeout(() => {
       child.kill()
-      resolve(null)
+      void finalize(null)
     }, AI_FILE_TIMEOUT_MS)
 
     child.on('close', (code) => {
-      clearTimeout(timer)
-      const strResult = strOut.trim()
-      resolve(code === 0 && strResult ? strResult : null)
+      void (async () => {
+        let strResult = strOut.trim()
+        if (provider === 'codex' && outputFile) {
+          const fileOutput = await readFile(outputFile, 'utf-8').catch(() => '')
+          if (fileOutput.trim()) {
+            strResult = fileOutput.trim()
+          }
+        }
+        await finalize(code === 0 && strResult ? strResult : null)
+      })()
     })
 
     child.on('error', () => {
-      clearTimeout(timer)
-      resolve(null)
+      void finalize(null)
     })
+
+    if (provider === 'codex' && child.stdin) {
+      child.stdin.write(strPrompt)
+      child.stdin.end()
+    }
   })
 }
 

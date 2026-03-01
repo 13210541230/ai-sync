@@ -5,15 +5,15 @@
  * 支持将 Claude/Cursor 的配置迁移到其他 AI 工具
  */
 
-import type { ConfigType, ToolConfig, ToolKey } from './lib/config'
+import type { ConfigDirType, ConfigType, SmartProvider, ToolConfig, ToolKey } from './lib/config'
 import type { BaseMigrator } from './lib/migrators/base'
 import type { MigrationResults } from './lib/utils/logger'
 import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
-import { getToolChoiceList, INTERNAL_CONFIG, isConfigTypeSupported } from './lib/config'
-import { applySmartAdaptation, batchAdaptWithAI, isClaudeCLIAvailable } from './lib/converters/smart-adapt'
+import { getConfigDirChoiceList, getToolChoiceList, INTERNAL_CONFIG, isConfigTypeSupported } from './lib/config'
+import { applySmartAdaptation, batchAdaptWithAI, isSmartProviderAvailable } from './lib/converters/smart-adapt'
 import { loadUserConfig, mergeConfigs } from './lib/customConfig'
 import { AgentsMigrator } from './lib/migrators/agents'
 import { CommandsMigrator } from './lib/migrators/commands'
@@ -26,11 +26,12 @@ import {
   getAgentsSourcePath,
   getCommandsSourcePath,
   getMCPSourcePath,
+  getProjectSkillsSourcePathByPreference,
   getRuleSourcePath,
   getSettingsSourcePath,
   getSkillsSourcePath,
   resolveSourceDir,
-  resolveTargetPath,
+  resolveTargetPathByScope,
 } from './lib/path'
 import { Logger } from './lib/utils/logger'
 
@@ -45,8 +46,11 @@ function printHelp(): void {
   console.log('  -t, --target <tools>   目标工具 (Target tools)，逗号分隔（如：cursor,claude,opencode）')
   console.log('  --type <types>         配置类型 (Config types)，逗号分隔（如：commands,skills,rules,mcp,settings）')
   console.log('  -c, --config <path>    指定配置文件 (Specify config file)')
+  console.log('  --scope <scope>        迁移范围：global 或 project (Migration scope: global or project)')
+  console.log('  --project              等价于 --scope project (Alias of --scope project)')
   console.log('  -y, --yes              自动覆盖 (Auto overwrite)')
   console.log('  --smart                启用智能适配 (Enable smart adaptation via AI)')
+  console.log('  --smart-provider <p>   智能适配后端：claude 或 codex (AI provider: claude or codex)')
   console.log('  -h, --help             显示帮助信息 (Show help)')
   console.log('  --interactive          强制交互模式 (Force interactive mode)（默认）\n')
   console.log('支持的工具 (Supported tools):')
@@ -71,12 +75,24 @@ async function interactiveMode(tools: Record<ToolKey, ToolConfig> = INTERNAL_CON
 
   logger.section('IDE Rules 迁移向导 (IDE Rules Migration Wizard)')
 
+  const { scope } = await inquirer.prompt<InteractiveAnswers>([
+    {
+      type: 'list',
+      name: 'scope',
+      message: '选择迁移范围 [Select migration scope]:',
+      choices: getConfigDirChoiceList(),
+      default: 'global',
+    },
+  ])
+
   const { sourceDir } = await inquirer.prompt<InteractiveAnswers>([
     {
       type: 'input',
       name: 'sourceDir',
       message: '源配置目录 (Source Directory):',
-      default: '~',
+      default: scope === 'project'
+        ? '.'
+        : '~',
     },
   ])
 
@@ -136,12 +152,31 @@ async function interactiveMode(tools: Record<ToolKey, ToolConfig> = INTERNAL_CON
     },
   ])
 
+  let smartProvider: SmartProvider = 'claude'
+  if (smart) {
+    const smartProviderAnswer = await inquirer.prompt<InteractiveAnswers>([
+      {
+        type: 'list',
+        name: 'smartProvider',
+        message: '选择智能适配后端 [Select AI adaptation provider]:',
+        choices: [
+          { name: 'Claude CLI（默认）', value: 'claude' },
+          { name: 'Codex CLI', value: 'codex' },
+        ],
+        default: 'claude',
+      },
+    ])
+    smartProvider = smartProviderAnswer.smartProvider || 'claude'
+  }
+
   return {
     tools: selectedTools,
     configTypes: selectedTypes,
     autoOverwrite: overwrite,
+    scope,
     sourceDir,
     smart,
+    smartProvider,
   }
 }
 
@@ -149,16 +184,19 @@ async function interactiveMode(tools: Record<ToolKey, ToolConfig> = INTERNAL_CON
  * 解析命令行参数
  */
 async function parseCommandLineArgs(): Promise<CommandLineOptions | null> {
-  const { values, positionals } = parseArgs({
+  const { values } = parseArgs({
     options: {
-      source: { type: 'string', short: 's' },
-      target: { type: 'string', short: 't' },
-      type: { type: 'string' },
-      config: { type: 'string', short: 'c' },
-      yes: { type: 'boolean', short: 'y' },
-      smart: { type: 'boolean' },
-      help: { type: 'boolean', short: 'h' },
-      interactive: { type: 'boolean' },
+      'source': { type: 'string', short: 's' },
+      'target': { type: 'string', short: 't' },
+      'type': { type: 'string' },
+      'config': { type: 'string', short: 'c' },
+      'scope': { type: 'string' },
+      'project': { type: 'boolean' },
+      'yes': { type: 'boolean', short: 'y' },
+      'smart': { type: 'boolean' },
+      'smart-provider': { type: 'string' },
+      'help': { type: 'boolean', short: 'h' },
+      'interactive': { type: 'boolean' },
     },
     allowPositionals: true,
   })
@@ -188,14 +226,28 @@ async function parseCommandLineArgs(): Promise<CommandLineOptions | null> {
     ? resolve(expandHome(values.source))
     : undefined
   const config = values.config
+  const strScope = values.project
+    ? 'project'
+    : (values.scope || 'global')
+  const scope: ConfigDirType = strScope === 'project'
+    ? 'project'
+    : 'global'
+  const smartProviderValue = typeof values['smart-provider'] === 'string'
+    ? values['smart-provider'].toLowerCase()
+    : undefined
+  const smartProvider: SmartProvider = smartProviderValue === 'codex'
+    ? 'codex'
+    : 'claude'
 
   return {
     tools,
     configTypes,
     autoOverwrite,
+    scope,
     sourceDir,
     config,
     smart: values.smart || false,
+    smartProvider,
   }
 }
 
@@ -218,11 +270,14 @@ async function main(): Promise<void> {
     options = (await interactiveMode(toolsConfig)) as CommandLineOptions
   }
 
-  /** 检测 --smart 模式下 claude CLI 可用性 */
+  options.scope = options.scope || 'global'
+  options.smartProvider = options.smartProvider || 'claude'
+
+  /** 检测 --smart 模式下 AI 后端可用性 */
   if (options.smart) {
-    const bAvailable = await isClaudeCLIAvailable()
+    const bAvailable = await isSmartProviderAvailable(options.smartProvider)
     if (!bAvailable) {
-      console.log(chalk.yellow('⚠ claude CLI 不可用，AI 适配已禁用，仅使用规则引擎'))
+      console.log(chalk.yellow(`⚠ ${options.smartProvider} CLI 不可用，AI 适配已禁用，仅使用规则引擎`))
       options.smart = false
     }
   }
@@ -233,8 +288,14 @@ async function main(): Promise<void> {
   /** 探测源目录 */
   let sourceDir: string
   try {
-    const defaultConfigDir = userConfig.global?.defaultConfigDir || expandHome('~/.claude')
-    sourceDir = await resolveSourceDir(options.sourceDir, defaultConfigDir)
+    if (options.scope === 'project' && !options.sourceDir) {
+      sourceDir = process.cwd()
+    }
+    else {
+      const defaultConfigDir = userConfig.global?.defaultConfigDir || expandHome('~/.claude')
+      sourceDir = await resolveSourceDir(options.sourceDir, defaultConfigDir)
+    }
+    options.sourceDir = sourceDir
   }
   catch (error) {
     console.error(chalk.red(error instanceof Error
@@ -245,10 +306,14 @@ async function main(): Promise<void> {
 
   logger.section('开始迁移 (Start Migration)')
   console.log(chalk.cyan(`源目录 (Source directory): ${sourceDir}`))
+  console.log(chalk.cyan(`迁移范围 (Scope): ${options.scope}`))
   console.log(chalk.cyan(`目标工具 (Target tools): ${options.tools.map(t => mergedConfigs.tools?.[t]?.name || t).join(', ')}`))
   console.log(chalk.cyan(`自动覆盖 (Auto overwrite): ${options.autoOverwrite
     ? '是 (Yes)'
     : '否 (No)'}`))
+  if (options.smart) {
+    console.log(chalk.cyan(`智能适配后端 (Smart provider): ${options.smartProvider}`))
+  }
   console.log('')
 
   const results: MigrationResults = {
@@ -262,7 +327,16 @@ async function main(): Promise<void> {
   const configTypes: ConfigType[] = options.configTypes || ['commands', 'skills', 'agents', 'rules', 'mcp', 'settings']
 
   for (const configType of configTypes) {
-    const supportedTools = options.tools.filter(supportedTool => isConfigTypeSupported(supportedTool, configType, toolsConfig))
+    if (options.scope === 'project' && !['rules', 'skills'].includes(configType)) {
+      logger.warn(`⚠ scope=project 当前仅支持 rules/skills，跳过 ${configType}`)
+      continue
+    }
+
+    const scopedTools = options.scope === 'project'
+      ? options.tools.filter(tool => tool === 'claude' || tool === 'codex')
+      : options.tools
+
+    const supportedTools = scopedTools.filter(supportedTool => isConfigTypeSupported(supportedTool, configType, toolsConfig))
 
     if (supportedTools.length === 0) {
       continue
@@ -275,7 +349,9 @@ async function main(): Promise<void> {
 
       switch (configType) {
         case 'rules': {
-          const ruleSourcePath = await getRuleSourcePath(sourceDir)
+          const ruleSourcePath = options.scope === 'project'
+            ? sourceDir
+            : await getRuleSourcePath(sourceDir)
           migrator = new RulesMigrator(ruleSourcePath, supportedTools, options, toolsConfig)
           break
         }
@@ -285,6 +361,23 @@ async function main(): Promise<void> {
           break
         }
         case 'skills': {
+          if (options.scope === 'project') {
+            for (const scopedTool of supportedTools) {
+              const preferSource = scopedTool === 'claude'
+                ? 'codex'
+                : 'claude'
+              const skillsPath = await getProjectSkillsSourcePathByPreference(sourceDir, preferSource)
+              const scopedMigrator = new SkillsMigrator(skillsPath, [scopedTool], options, toolsConfig)
+              const scopedResults = await scopedMigrator.migrate()
+              results.success += scopedResults.success
+              results.skipped += scopedResults.skipped
+              results.error += scopedResults.error
+              results.errors.push(...scopedResults.errors)
+            }
+            spinner.succeed(chalk.green(`迁移 ${configType} 完成 (Migrated ${configType} successfully)`))
+            continue
+          }
+
           const skillsPath = await getSkillsSourcePath(sourceDir)
           migrator = new SkillsMigrator(skillsPath, supportedTools, options, toolsConfig)
           break
@@ -330,21 +423,28 @@ async function main(): Promise<void> {
   /** Layer 2: AI 批量适配（--smart 模式，迁移完成后执行） */
   if (options.smart) {
     const aiConfigTypes: ConfigType[] = ['skills', 'agents', 'commands', 'rules']
-    for (const tool of options.tools) {
-      if (tool === 'claude') continue
+    const aiTools = options.scope === 'project'
+      ? options.tools.filter(tool => tool === 'claude' || tool === 'codex')
+      : options.tools
+
+    for (const tool of aiTools) {
+      if (tool === 'claude')
+        continue
 
       const vecDirs: string[] = []
       for (const ct of aiConfigTypes) {
-        if (!configTypes.includes(ct)) continue
-        if (!isConfigTypeSupported(tool, ct, toolsConfig)) continue
+        if (!configTypes.includes(ct))
+          continue
+        if (!isConfigTypeSupported(tool, ct, toolsConfig))
+          continue
         try {
-          vecDirs.push(await resolveTargetPath(tool, ct))
+          vecDirs.push(await resolveTargetPathByScope(tool, ct, options.scope, sourceDir))
         }
         catch { /* 忽略不存在的路径 */ }
       }
 
       if (vecDirs.length > 0) {
-        await batchAdaptWithAI(tool, vecDirs)
+        await batchAdaptWithAI(tool, vecDirs, options.smartProvider)
       }
     }
   }
@@ -365,9 +465,11 @@ interface CommandLineOptions {
   tools: ToolKey[]
   configTypes?: ConfigType[]
   autoOverwrite: boolean
+  scope: ConfigDirType
   sourceDir: string | undefined
   config?: string
   smart?: boolean
+  smartProvider?: SmartProvider
 }
 
 /**
@@ -378,5 +480,7 @@ interface InteractiveAnswers {
   configTypes: ConfigType[]
   overwrite: boolean
   smart: boolean
+  scope: ConfigDirType
+  smartProvider?: SmartProvider
   sourceDir?: string
 }

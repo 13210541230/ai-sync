@@ -1,6 +1,6 @@
 import type { ConfigType, ToolConfig, ToolKey } from '../config'
 import type { MigrateOptions, MigrationStats } from './types'
-import { resolveTargetPath } from '../path'
+import { resolveTargetPathByScope } from '../path'
 import { logger } from '../utils/logger'
 
 /**
@@ -68,9 +68,11 @@ export abstract class BaseMigrator {
    * 获取目标路径
    */
   protected async getTargetDir(tool: ToolKey): Promise<string> {
-    return resolveTargetPath(
+    return resolveTargetPathByScope(
       tool,
       this.configType,
+      this.options.scope || 'global',
+      this.options.sourceDir,
     )
   }
 

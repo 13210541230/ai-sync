@@ -225,4 +225,86 @@ describe('集成测试 (全面覆盖)', () => {
       expect(content).toContain('测试规则 2')
     })
   })
+
+  describe('项目级 codex <-> claude 互转', () => {
+    it('应将项目内 CLAUDE.md（含子目录）和项目 rules/skills 迁移到 codex', async () => {
+      const projectRoot = join(testTargetDir, 'project-claude')
+      await ensureDirectoryExists(join(projectRoot, 'sub'))
+      await ensureDirectoryExists(join(projectRoot, '.claude', 'rules'))
+      await ensureDirectoryExists(join(projectRoot, '.claude', 'skills'))
+
+      await writeFile(join(projectRoot, 'CLAUDE.md'), '# root claude')
+      await writeFile(join(projectRoot, 'sub', 'CLAUDE.md'), '# sub claude')
+      await writeFile(join(projectRoot, '.claude', 'rules', 'strict.mdc'), 'rule content')
+      await writeFile(join(projectRoot, '.claude', 'skills', 'project-skill.md'), '# skill')
+
+      const options = { autoOverwrite: true, scope: 'project' as const, sourceDir: projectRoot }
+      const rulesMigrator = new RulesMigrator(projectRoot, ['codex'], options, TOOL_CONFIGS)
+      const skillsMigrator = new SkillsMigrator(join(projectRoot, '.claude', 'skills'), ['codex'], options, TOOL_CONFIGS)
+
+      await rulesMigrator.migrate()
+      await skillsMigrator.migrate()
+
+      expect(await fileExists(join(projectRoot, 'AGENTS.md'))).toBe(true)
+      expect(await fileExists(join(projectRoot, 'sub', 'AGENTS.md'))).toBe(true)
+      expect(await fileExists(join(projectRoot, '.codex', 'rules', 'strict.mdc'))).toBe(true)
+      expect(await fileExists(join(projectRoot, '.codex', 'skills', 'project-skill.md'))).toBe(true)
+    })
+
+    it('应将项目内 AGENTS.md（含子目录）和项目 rules/skills 迁移到 claude', async () => {
+      const projectRoot = join(testTargetDir, 'project-codex')
+      await ensureDirectoryExists(join(projectRoot, 'sub'))
+      await ensureDirectoryExists(join(projectRoot, '.codex', 'rules'))
+      await ensureDirectoryExists(join(projectRoot, '.codex', 'skills'))
+
+      await writeFile(join(projectRoot, 'AGENTS.md'), '# root agents')
+      await writeFile(join(projectRoot, 'sub', 'AGENTS.md'), '# sub agents')
+      await writeFile(join(projectRoot, '.codex', 'rules', 'base.mdc'), 'codex rule')
+      await writeFile(join(projectRoot, '.codex', 'skills', 'codex-skill.md'), '# codex skill')
+
+      const options = { autoOverwrite: true, scope: 'project' as const, sourceDir: projectRoot }
+      const rulesMigrator = new RulesMigrator(projectRoot, ['claude'], options, TOOL_CONFIGS)
+      const skillsMigrator = new SkillsMigrator(join(projectRoot, '.codex', 'skills'), ['claude'], options, TOOL_CONFIGS)
+
+      await rulesMigrator.migrate()
+      await skillsMigrator.migrate()
+
+      expect(await fileExists(join(projectRoot, 'CLAUDE.md'))).toBe(true)
+      expect(await fileExists(join(projectRoot, 'sub', 'CLAUDE.md'))).toBe(true)
+      expect(await fileExists(join(projectRoot, '.claude', 'rules', 'base.mdc'))).toBe(true)
+      expect(await fileExists(join(projectRoot, '.claude', 'skills', 'codex-skill.md'))).toBe(true)
+    })
+
+    it('当同目录同时存在 CLAUDE.md 和 AGENTS.md 时，应按目标方向优先选反向源文件', async () => {
+      const projectToClaude = join(testTargetDir, 'project-both-to-claude')
+      await ensureDirectoryExists(join(projectToClaude, 'sub'))
+      await writeFile(join(projectToClaude, 'CLAUDE.md'), '# keep-claude-root')
+      await writeFile(join(projectToClaude, 'AGENTS.md'), '# from-agents-root')
+      await writeFile(join(projectToClaude, 'sub', 'CLAUDE.md'), '# keep-claude-sub')
+      await writeFile(join(projectToClaude, 'sub', 'AGENTS.md'), '# from-agents-sub')
+
+      const optionsToClaude = { autoOverwrite: true, scope: 'project' as const, sourceDir: projectToClaude }
+      await new RulesMigrator(projectToClaude, ['claude'], optionsToClaude, TOOL_CONFIGS).migrate()
+
+      const claudeRoot = await readFile(join(projectToClaude, 'CLAUDE.md'), 'utf-8')
+      const claudeSub = await readFile(join(projectToClaude, 'sub', 'CLAUDE.md'), 'utf-8')
+      expect(claudeRoot).toContain('from-agents-root')
+      expect(claudeSub).toContain('from-agents-sub')
+
+      const projectToCodex = join(testTargetDir, 'project-both-to-codex')
+      await ensureDirectoryExists(join(projectToCodex, 'sub'))
+      await writeFile(join(projectToCodex, 'CLAUDE.md'), '# from-claude-root')
+      await writeFile(join(projectToCodex, 'AGENTS.md'), '# keep-agents-root')
+      await writeFile(join(projectToCodex, 'sub', 'CLAUDE.md'), '# from-claude-sub')
+      await writeFile(join(projectToCodex, 'sub', 'AGENTS.md'), '# keep-agents-sub')
+
+      const optionsToCodex = { autoOverwrite: true, scope: 'project' as const, sourceDir: projectToCodex }
+      await new RulesMigrator(projectToCodex, ['codex'], optionsToCodex, TOOL_CONFIGS).migrate()
+
+      const agentsRoot = await readFile(join(projectToCodex, 'AGENTS.md'), 'utf-8')
+      const agentsSub = await readFile(join(projectToCodex, 'sub', 'AGENTS.md'), 'utf-8')
+      expect(agentsRoot).toContain('from-claude-root')
+      expect(agentsSub).toContain('from-claude-sub')
+    })
+  })
 })

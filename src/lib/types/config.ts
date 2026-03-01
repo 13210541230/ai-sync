@@ -23,6 +23,11 @@ export type FormatType = 'markdown' | 'toml' | 'mdc' | 'json'
 export type ConfigDirType = 'global' | 'project'
 
 /**
+ * 智能适配后端
+ */
+export type SmartProvider = 'claude' | 'codex'
+
+/**
  * 命令配置
  */
 export interface CommandConfig {

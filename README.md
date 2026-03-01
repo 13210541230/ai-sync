@@ -47,8 +47,12 @@ npm i -g @jl-org/ai-sync
 
 # 交互式执行
 ai-sync
-# 启用智能适配（AI 语义改写，需本地安装 claude CLI）
+# 启用智能适配（AI 语义改写，需本地安装 claude/codex CLI）
 ai-sync --smart
+# 使用 Codex 作为智能适配后端
+ai-sync --smart --smart-provider codex
+# 项目级迁移（codex/claude 互转，rules + skills）
+ai-sync -t codex --type rules,skills --scope project
 # 查看帮助
 ai-sync --help
 ```
@@ -61,7 +65,7 @@ ai-sync --help
  ◯  Gemini CLI
  ◯  IFlow CLI
 
-? 配置到当前项目（否则为全局配置）？ (y/N) n
+? 选择迁移范围 [Select migration scope]: global
 ? 启用智能适配？（通过 AI 对内容进行语义级改写） (y/N) n
 ? 是否自动覆盖已存在的文件？ (y/N) y
 
@@ -135,13 +139,14 @@ export default defineConfig({
 | 层级 | 说明 | 触发条件 |
 |------|------|----------|
 | **Layer 1: 规则引擎** | 路径前缀替换（`~/.claude/` → `~/.cursor/` 等）、工具名替换（`Claude Code` → `Cursor` 等）、Claude 专属 Skill 自动跳过 | 始终启用 |
-| **Layer 2: AI 适配** | 通过本地 `claude` CLI 对内容进行语义级改写，移除/适配目标工具不支持的特性 | 仅 `--smart` 模式 |
+| **Layer 2: AI 适配** | 通过本地 `claude` 或 `codex` CLI 对内容进行语义级改写，移除/适配目标工具不支持的特性 | `--smart` + 可选 `--smart-provider` |
 
-**前置条件**：Layer 2 需要本地安装 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)。若未检测到 CLI，将回退到仅 Layer 1 并提示警告。
+**前置条件**：Layer 2 需要本地安装所选后端 CLI（`claude` 或 `codex`）。若未检测到 CLI，将回退到仅 Layer 1 并提示警告。
 
 ### 路径规则
 
 - **工具配置**：统一使用全局 Home 目录下的配置路径，如 `~/.claude/`
+- **项目级迁移**：`--scope project` 重点支持 codex/claude 互转，迁移项目规则文件（`CLAUDE.md`/`AGENTS.md`，含子目录）及项目级 `rules`/`skills`
 - **路径解析**：支持使用 `~` 表示用户主目录，自动处理跨平台路径
 - **默认目录**：默认使用家目录 `~` 作为配置探测起点，以 `~/.claude` 作为唯一配置标准
 - **指定路径**：支持通过命令行参数或配置文件指定自定义的源目录和目标项目目录

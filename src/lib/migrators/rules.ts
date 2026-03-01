@@ -5,10 +5,18 @@
 import type { ToolConfig, ToolKey } from '../config'
 import type { MigrateOptions, MigrationStats } from './types'
 import { readdir, stat } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { mergeRules } from '../converters/rules-merger'
-import { copyDirectory, copyFileSafe, ensureDirectoryExists, fileExists, readFile, writeFile } from '../utils/file'
+import { copyDirectory, copyFileSafe, directoryExists, ensureDirectoryExists, fileExists, readFile, writeFile } from '../utils/file'
 import { BaseMigrator } from './base'
+
+const PROJECT_RULE_NAME = /^(claude|agents)\.md$/i
+const PROJECT_SCAN_SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'coverage'])
+
+interface ProjectRuleFile {
+  sourcePath: string
+  relativeDir: string
+}
 
 /**
  * Rules 迁移器类
@@ -26,6 +34,11 @@ export class RulesMigrator extends BaseMigrator {
     const toolConfig = this.tools[tool]
 
     if (!toolConfig.rules) {
+      return results
+    }
+
+    if (this.options.scope === 'project' && (tool === 'claude' || tool === 'codex')) {
+      await this.migrateProjectRules(tool, results)
       return results
     }
 
@@ -159,6 +172,168 @@ export class RulesMigrator extends BaseMigrator {
       results.error++
       results.errors.push({ file: targetFile, error: errorMessage })
     }
+  }
+
+  /**
+   * 项目级 Rules 迁移（递归规则文件 + 项目级 rules 目录）
+   */
+  private async migrateProjectRules(tool: ToolKey, results: MigrationStats): Promise<void> {
+    const projectRoot = this.sourceDir
+    const targetRuleName = tool === 'codex'
+      ? 'AGENTS.md'
+      : 'CLAUDE.md'
+    const transform = this.tools[tool]?.rules?.transform
+
+    const files = await this.collectProjectRuleFiles(projectRoot, projectRoot)
+    const selectedFiles = this.selectProjectRuleFiles(files, targetRuleName, projectRoot)
+
+    for (const file of selectedFiles) {
+      const targetFile = file.relativeDir
+        ? join(projectRoot, file.relativeDir, targetRuleName)
+        : join(projectRoot, targetRuleName)
+
+      if (file.sourcePath.toLowerCase() === targetFile.toLowerCase()) {
+        results.skipped++
+        continue
+      }
+
+      if (await fileExists(targetFile) && !this.options.autoOverwrite) {
+        results.skipped++
+        continue
+      }
+
+      try {
+        const content = await readFile(file.sourcePath, 'utf-8')
+        const transformed = transform
+          ? await transform(content, basename(file.sourcePath))
+          : content
+        await ensureDirectoryExists(dirname(targetFile))
+        await writeFile(targetFile, transformed, 'utf-8')
+        this.reportSuccess(`迁移项目规则文件: ${file.sourcePath} → ${targetFile}`)
+        results.success++
+      }
+      catch (error) {
+        const errorMessage = error instanceof Error
+          ? error.message
+          : 'Unknown error'
+        this.reportError(`迁移项目规则文件失败: ${file.sourcePath}`, errorMessage)
+        results.error++
+        results.errors.push({ file: file.sourcePath, error: errorMessage })
+      }
+    }
+
+    await this.migrateProjectRuleDirectory(tool, projectRoot, results)
+  }
+
+  /**
+   * 递归收集项目内 CLAUDE.md / AGENTS.md
+   */
+  private async collectProjectRuleFiles(rootDir: string, scanDir: string): Promise<ProjectRuleFile[]> {
+    const files: ProjectRuleFile[] = []
+    let entries
+    try {
+      entries = await readdir(scanDir, { withFileTypes: true })
+    }
+    catch {
+      return files
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (PROJECT_SCAN_SKIP_DIRS.has(entry.name)) {
+          continue
+        }
+        files.push(...await this.collectProjectRuleFiles(rootDir, join(scanDir, entry.name)))
+      }
+      else if (entry.isFile() && PROJECT_RULE_NAME.test(entry.name)) {
+        const sourcePath = join(scanDir, entry.name)
+        const relativeDirRaw = relative(rootDir, scanDir)
+        const relativeDir = relativeDirRaw === '.'
+          ? ''
+          : relativeDirRaw
+        files.push({ sourcePath, relativeDir })
+      }
+    }
+
+    return files
+  }
+
+  /**
+   * 同目录优先选择 CLAUDE.md，其次 AGENTS.md
+   */
+  private selectProjectRuleFiles(
+    files: ProjectRuleFile[],
+    targetRuleName: string,
+    projectRoot: string,
+  ): ProjectRuleFile[] {
+    const priorityNames = targetRuleName.toLowerCase() === 'agents.md'
+      ? ['claude.md', 'agents.md']
+      : ['agents.md', 'claude.md']
+
+    const grouped = new Map<string, ProjectRuleFile[]>()
+    for (const file of files) {
+      const vecGroup = grouped.get(file.relativeDir) || []
+      vecGroup.push(file)
+      grouped.set(file.relativeDir, vecGroup)
+    }
+
+    const selected: ProjectRuleFile[] = []
+    for (const [relativeDir, group] of grouped.entries()) {
+      const targetFilePath = (relativeDir
+        ? join(projectRoot, relativeDir, targetRuleName)
+        : join(projectRoot, targetRuleName)).toLowerCase()
+
+      const sorted = [...group].sort((a, b) => {
+        const aName = basename(a.sourcePath).toLowerCase()
+        const bName = basename(b.sourcePath).toLowerCase()
+        const aPriority = priorityNames.indexOf(aName)
+        const bPriority = priorityNames.indexOf(bName)
+        return aPriority - bPriority
+      })
+
+      const candidate = sorted.find(file => file.sourcePath.toLowerCase() !== targetFilePath) || sorted[0]
+      selected.push(candidate)
+    }
+
+    return selected
+  }
+
+  /**
+   * 迁移项目级 rules 目录（.claude/rules 或 .codex/rules）
+   */
+  private async migrateProjectRuleDirectory(tool: ToolKey, projectRoot: string, results: MigrationStats): Promise<void> {
+    const sourceCandidates = [
+      join(projectRoot, '.claude/rules'),
+      join(projectRoot, '.codex/rules'),
+    ]
+
+    let sourceDir: string | undefined
+    for (const candidate of sourceCandidates) {
+      if (await directoryExists(candidate)) {
+        sourceDir = candidate
+        break
+      }
+    }
+
+    if (!sourceDir) {
+      return
+    }
+
+    const targetDir = tool === 'codex'
+      ? join(projectRoot, '.codex/rules')
+      : join(projectRoot, '.claude/rules')
+
+    if (sourceDir.toLowerCase() === targetDir.toLowerCase()) {
+      return
+    }
+
+    const transform = this.tools[tool]?.rules?.transform
+    if (transform) {
+      await this.copyWithTransform(sourceDir, targetDir, results, transform)
+      return
+    }
+
+    const stats = await copyDirectory(sourceDir, targetDir, this.options.autoOverwrite)
+    this.sumStats(results, stats)
   }
 
   /**

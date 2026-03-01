@@ -1,16 +1,18 @@
 /**
  * 智能适配层核心
  * Layer 1: 规则引擎（确定性替换）- 默认启用
- * Layer 2: AI 适配（claude CLI 批量语义改写）- --smart 触发，迁移完成后执行
+ * Layer 2: AI 适配（claude/codex CLI 批量语义改写）- --smart 触发，迁移完成后执行
  */
 
-import type { ToolConfig, ToolKey } from '../types/config'
+import type { SmartProvider, ToolConfig, ToolKey } from '../types/config'
+import type { ToolAdaptInfo } from './adapt-rules'
 import { execFile, spawn } from 'node:child_process'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { platform } from 'node:os'
+import { join } from 'node:path'
 import chalk from 'chalk'
-import { mergeRules } from './rules-merger'
 import { CLAUDE_SPECIFIC_PATTERNS, createReplacements, TOOL_ADAPT_MAP } from './adapt-rules'
+import { mergeRules } from './rules-merger'
 
 /** 排除嵌套会话检测的环境变量 */
 function getCleanEnv(): NodeJS.ProcessEnv {
@@ -24,8 +26,16 @@ const CLAUDE_SPECIFIC_THRESHOLD = 2
 /** CLI 版本检测超时（毫秒） */
 const CLI_VERSION_TIMEOUT_MS = 5000
 
-/** AI 批量适配超时（毫秒）— 30 分钟 */
-const AI_BATCH_TIMEOUT_MS = 30 * 60 * 1000
+/** AI 单文件适配并发数 */
+const AI_CONCURRENCY = 5
+
+/** AI 单文件适配超时（毫秒）— 10 分钟 */
+const AI_FILE_TIMEOUT_MS = 10 * 60 * 1000
+
+const PROVIDER_COMMANDS: Record<SmartProvider, string> = {
+  claude: 'claude',
+  codex: 'codex',
+}
 
 /**
  * Layer 1: 规则引擎 - 确定性内容适配
@@ -43,24 +53,31 @@ export function adaptContent(content: string, toolKey: ToolKey): string {
  * 检测 Skill 是否应该跳过（含 Claude 专属特征）
  */
 export function shouldSkipSkill(content: string, _fileName: string, toolKey: ToolKey): boolean {
-  if (toolKey === 'claude') return false
+  if (toolKey === 'claude')
+    return false
 
   let nMatchCount = 0
   for (const pattern of CLAUDE_SPECIFIC_PATTERNS) {
-    if (pattern.test(content)) nMatchCount++
+    if (pattern.test(content))
+      nMatchCount++
   }
 
   return nMatchCount >= CLAUDE_SPECIFIC_THRESHOLD
 }
 
 /**
- * 检测 claude CLI 是否可用
+ * 检测智能适配后端 CLI 是否可用
  */
-export function isClaudeCLIAvailable(): Promise<boolean> {
+export function isSmartProviderAvailable(provider: SmartProvider): Promise<boolean> {
   return new Promise((resolve) => {
+    const command = PROVIDER_COMMANDS[provider]
     const bIsWin = platform() === 'win32'
-    const strCmd = bIsWin ? 'cmd' : 'claude'
-    const vecArgs = bIsWin ? ['/c', 'claude', '--version'] : ['--version']
+    const strCmd = bIsWin
+      ? 'cmd'
+      : command
+    const vecArgs = bIsWin
+      ? ['/c', command, '--version']
+      : ['--version']
 
     execFile(strCmd, vecArgs, { timeout: CLI_VERSION_TIMEOUT_MS, env: getCleanEnv() }, (err) => {
       resolve(!err)
@@ -69,70 +86,169 @@ export function isClaudeCLIAvailable(): Promise<boolean> {
 }
 
 /**
- * Layer 2: AI 批量适配 - 通过 claude CLI（yolo 模式）批量处理目标目录
+ * 兼容旧 API：检测 claude CLI
+ */
+export function isClaudeCLIAvailable(): Promise<boolean> {
+  return isSmartProviderAvailable('claude')
+}
+
+/**
+ * 递归收集目录下所有 .md 文件
+ */
+async function collectMarkdownFiles(dirs: string[]): Promise<string[]> {
+  const vecFiles: string[] = []
+  for (const dir of dirs) {
+    try {
+      const entries = await readdir(dir, { recursive: true })
+      for (const entry of entries) {
+        if (typeof entry === 'string' && entry.endsWith('.md'))
+          vecFiles.push(join(dir, entry))
+      }
+    }
+    catch { /* 目录不存在则跳过 */ }
+  }
+  return vecFiles
+}
+
+/**
+ * 构建单文件 AI 适配 prompt（指令 + 文件内容一体）
+ */
+function buildAdaptPrompt(content: string, info: ToolAdaptInfo): string {
+  return [
+    `AUTOMATED TEXT TRANSFORMER — output ONLY the adapted text, nothing else.`,
+    `Convert this markdown from Claude Code to ${info.displayName}.`,
+    `Rules:`,
+    `- Remove mcp__xxx tool references (e.g. mcp__word__create)`,
+    `- Remove or generalize Claude Code slash commands (/commit, /review-pr, etc.)`,
+    `- Remove Claude Code-specific workflow instructions and agent patterns`,
+    `- Replace remaining "Claude Code" mentions with "${info.displayName}"`,
+    `- Keep ALL other content, structure, formatting, and original language intact`,
+    `- If content is already tool-agnostic, output it unchanged`,
+    `CRITICAL: Your entire response must be the adapted file content only. No preamble, no explanation, no code fences, no trailing summary.`,
+    ``,
+    content,
+  ].join('\n')
+}
+
+/** Windows cmd /c 参数长度安全阈值（字节） */
+const WIN_CMD_SAFE_LIMIT = 7500
+
+/**
+ * 单文件 AI 适配：直接通过 prompt 参数传递内容，CLI 输出转换后文本
+ */
+function adaptSingleFile(
+  content: string,
+  info: ToolAdaptInfo,
+  provider: SmartProvider,
+): Promise<string | null> {
+  const strPrompt = buildAdaptPrompt(content, info)
+
+  if (platform() === 'win32' && strPrompt.length > WIN_CMD_SAFE_LIMIT) {
+    console.log(chalk.yellow(`   ⚠ 文件过大 (${strPrompt.length} chars)，跳过 AI 适配`))
+    return Promise.resolve(null)
+  }
+
+  return new Promise((resolve) => {
+    const command = PROVIDER_COMMANDS[provider]
+    const args = provider === 'claude'
+      ? ['-p', strPrompt]
+      : ['exec', strPrompt, '--skip-git-repo-check', '--color', 'never']
+
+    const child = spawn(command, args, {
+      shell: true,
+      env: getCleanEnv(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+
+    let strOut = ''
+    child.stdout.on('data', (d: Buffer) => { strOut += d.toString() })
+
+    const timer = setTimeout(() => {
+      child.kill()
+      resolve(null)
+    }, AI_FILE_TIMEOUT_MS)
+
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      const strResult = strOut.trim()
+      resolve(code === 0 && strResult ? strResult : null)
+    })
+
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolve(null)
+    })
+  })
+}
+
+/**
+ * Layer 2: AI 批量适配 — 逐文件并行处理，Node.js 管理文件 I/O，CLI 仅做 text-in/text-out
  *
- * 迁移完成后调用，一次性让 claude 读取所有目标文件并执行语义级适配
+ * 迁移完成后调用，并行启动多个 AI 进程处理各文件
  */
 export async function batchAdaptWithAI(
   toolKey: ToolKey,
   targetDirs: string[],
+  provider: SmartProvider = 'claude',
 ): Promise<boolean> {
   const info = TOOL_ADAPT_MAP[toolKey]
-  if (!info || targetDirs.length === 0) return false
-
-  const strDirsCsv = targetDirs.join(', ')
-
-  /**
-   * 单行 prompt：避免 Windows cmd /c 截断多行参数
-   * 包含完整指令，无需 stdin/临时文件中转
-   */
-  const strPrompt = `You are a migration assistant. Read ALL .md files recursively in these directories: ${strDirsCsv}. These files were migrated from Claude Code to ${info.displayName} with basic replacements already done. For each file: (1) Use the Read tool to read its content. (2) Remove or adapt Claude Code-specific features not available in ${info.displayName}, such as mcp__xxx tool calls, Claude Code slash commands, and Claude-specific workflows. (3) Adapt paths, workflows, and commands to ${info.displayName} conventions. (4) Keep structure, formatting, and original language intact. (5) If already generic, skip it. (6) Use the Edit tool to apply targeted changes. Process every file now.`
-
-  try {
-    console.log(chalk.cyan(`\n🤖 AI 批量适配中 (${toolKey})，使用 claude yolo 模式...`))
-    console.log(chalk.gray(`   目录: ${strDirsCsv}`))
-    console.log(chalk.gray(`   超时: ${AI_BATCH_TIMEOUT_MS / 60000} 分钟`))
-
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn('claude', ['--dangerously-skip-permissions', '-p', strPrompt], {
-        shell: true,
-        env: getCleanEnv(),
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-
-      child.stdout.on('data', (data: Buffer) => {
-        const str = data.toString().trim()
-        if (str) console.log(chalk.gray(`   ${str}`))
-      })
-
-      let strStderr = ''
-      child.stderr.on('data', (data: Buffer) => { strStderr += data.toString() })
-
-      const timer = setTimeout(() => {
-        child.kill()
-        reject(new Error(`AI 批量适配超时 (${AI_BATCH_TIMEOUT_MS / 60000} 分钟)`))
-      }, AI_BATCH_TIMEOUT_MS)
-
-      child.on('close', (code) => {
-        clearTimeout(timer)
-        if (code !== 0) reject(new Error(strStderr || `Exit code ${code}`))
-        else resolve()
-      })
-
-      child.on('error', (err) => {
-        clearTimeout(timer)
-        reject(err)
-      })
-    })
-
-    console.log(chalk.green(`✓ AI 批量适配完成 (${toolKey})`))
-    return true
-  }
-  catch (e) {
-    const strMsg = e instanceof Error ? e.message : String(e)
-    console.log(chalk.yellow(`⚠ AI 批量适配失败 (${toolKey})，规则引擎结果保留: ${strMsg}`))
+  if (!info || targetDirs.length === 0)
     return false
+
+  const vecFiles = await collectMarkdownFiles(targetDirs)
+  if (vecFiles.length === 0)
+    return true
+
+  console.log(chalk.cyan(`\n🤖 AI 适配中 (${toolKey}/${provider})，${vecFiles.length} 个文件，并发 ${AI_CONCURRENCY}...`))
+
+  let nSuccess = 0
+  let nSkipped = 0
+  let nFailed = 0
+
+  const queue = [...vecFiles]
+
+  async function worker(): Promise<void> {
+    while (queue.length > 0) {
+      const filePath = queue.shift()
+      if (!filePath)
+        break
+
+      try {
+        const strContent = await readFile(filePath, 'utf-8')
+
+        if (!CLAUDE_SPECIFIC_PATTERNS.some(p => p.test(strContent))) {
+          nSkipped++
+          continue
+        }
+
+        const strAdapted = await adaptSingleFile(strContent, info, provider)
+        if (!strAdapted) {
+          nFailed++
+          console.log(chalk.yellow(`   ✗ ${filePath}`))
+          continue
+        }
+
+        if (strAdapted !== strContent) {
+          await writeFile(filePath, strAdapted, 'utf-8')
+          nSuccess++
+          console.log(chalk.gray(`   ✓ ${filePath}`))
+        }
+        else {
+          nSkipped++
+        }
+      }
+      catch {
+        nFailed++
+        console.log(chalk.yellow(`   ✗ ${filePath}`))
+      }
+    }
   }
+
+  const nWorkers = Math.min(AI_CONCURRENCY, vecFiles.length)
+  await Promise.all(Array.from({ length: nWorkers }, () => worker()))
+
+  console.log(chalk.green(`✓ AI 适配完成 (${toolKey}/${provider})：成功 ${nSuccess}，跳过 ${nSkipped}，失败 ${nFailed}`))
+  return nFailed === 0
 }
 
 /**
@@ -147,11 +263,12 @@ function createSkillsTransform(
       return null
     }
 
-    let result = existingTransform
+    const result = existingTransform
       ? await existingTransform(content, fileName)
       : content
 
-    if (result === null) return null
+    if (result === null)
+      return null
 
     return adaptContent(result, toolKey)
   }
@@ -198,8 +315,10 @@ export function applySmartAdaptation(
   toolsConfig: Record<string, ToolConfig>,
 ): void {
   for (const [toolKey, config] of Object.entries(toolsConfig)) {
-    if (toolKey === 'claude') continue
-    if (!TOOL_ADAPT_MAP[toolKey]) continue
+    if (toolKey === 'claude')
+      continue
+    if (!TOOL_ADAPT_MAP[toolKey])
+      continue
 
     // Skills transform
     if (config.skills) {

@@ -47,8 +47,12 @@ npm i -g @jl-org/ai-sync
 
 # Interactive execution
 ai-sync
-# Enable smart adaptation (AI semantic rewriting, requires local claude CLI)
+# Enable smart adaptation (AI semantic rewriting, requires local claude/codex CLI)
 ai-sync --smart
+# Use Codex as smart adaptation provider
+ai-sync --smart --smart-provider codex
+# Project-level migration (codex/claude conversion, rules + skills)
+ai-sync -t codex --type rules,skills --scope project
 # View help
 ai-sync --help
 ```
@@ -61,7 +65,7 @@ ai-sync --help
  ◯  Gemini CLI
  ◯  IFlow CLI
 
-? Configure to current project (otherwise global config)? (y/N) n
+? Select migration scope: global
 ? Enable smart adaptation? (AI semantic rewriting for content) (y/N) n
 ? Auto-overwrite existing files? (y/N) y
 
@@ -135,13 +139,14 @@ By default, migration only performs file copying and format conversion. With `--
 | Layer | Description | Trigger |
 |-------|-------------|---------|
 | **Layer 1: Rule Engine** | Path prefix replacement (`~/.claude/` → `~/.cursor/`, etc.), tool name replacement (`Claude Code` → `Cursor`, etc.), auto-skip Claude-exclusive Skills | Always enabled |
-| **Layer 2: AI Adaptation** | Semantic-level rewriting via local `claude` CLI, removes/adapts features unsupported by target tool | `--smart` mode only |
+| **Layer 2: AI Adaptation** | Semantic-level rewriting via local `claude` or `codex` CLI, removes/adapts features unsupported by target tool | `--smart` + optional `--smart-provider` |
 
-**Prerequisite**: Layer 2 requires [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed locally. If CLI is not detected, falls back to Layer 1 only with a warning.
+**Prerequisite**: Layer 2 requires the selected provider CLI (`claude` or `codex`) installed locally. If the provider is not detected, it falls back to Layer 1 only with a warning.
 
 ### Path Rules
 
 - **Tool Configuration**: Unified use of global Home directory configuration paths, such as `~/.cursor/`, `~/.claude/`
+- **Project Scope**: `--scope project` focuses on codex/claude conversion and migrates project rule files (`CLAUDE.md`/`AGENTS.md`, including subdirectories) plus project-level `rules`/`skills`
 - **Path Resolution**: Support using `~` to represent the user's home directory, automatically handles cross-platform paths
 - **Default Directory**: Default to using home directory `~` as the configuration detection starting point, with `~/.claude` as the sole configuration standard
 - **Specified Path**: Support specifying custom source and target project directories through command-line parameters or configuration files

@@ -1,4 +1,5 @@
 import type { ToolConfig } from '@lib/types/config'
+import type { ChildProcess } from 'node:child_process'
 import {
   CLAUDE_SPECIFIC_PATTERNS,
   createReplacements,
@@ -7,12 +8,22 @@ import {
 import {
   adaptContent,
   applySmartAdaptation,
+  isSmartProviderAvailable,
   shouldSkipSkill,
 } from '@lib/converters/smart-adapt'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const { execFileMock } = vi.hoisted(() => ({
+  execFileMock: vi.fn(),
+}))
+
+vi.mock('node:child_process', () => ({
+  execFile: execFileMock,
+  spawn: vi.fn(() => ({}) as ChildProcess),
+}))
 
 describe('adapt-rules', () => {
-  describe('TOOL_ADAPT_MAP', () => {
+  describe('tool_adapt_map', () => {
     it('应包含所有 6 个工具的适配信息', () => {
       const keys = Object.keys(TOOL_ADAPT_MAP)
       expect(keys).toContain('cursor')
@@ -49,7 +60,7 @@ describe('adapt-rules', () => {
     })
   })
 
-  describe('CLAUDE_SPECIFIC_PATTERNS', () => {
+  describe('claude_specific_patterns', () => {
     it('应匹配 MCP 工具调用', () => {
       const pattern = CLAUDE_SPECIFIC_PATTERNS.find(p => p.test('mcp__word__create'))
       expect(pattern).toBeDefined()
@@ -68,6 +79,51 @@ describe('adapt-rules', () => {
 })
 
 describe('smart-adapt', () => {
+  beforeEach(() => {
+    execFileMock.mockReset()
+  })
+
+  describe('isSmartProviderAvailable', () => {
+    it('provider 可用时应返回 true', async () => {
+      execFileMock.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null) => void) => {
+        cb(null)
+      })
+
+      const result = await isSmartProviderAvailable('claude')
+      expect(result).toBe(true)
+      expect(execFileMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('provider 不可用时应返回 false', async () => {
+      execFileMock.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null) => void) => {
+        cb(new Error('not found'))
+      })
+
+      const result = await isSmartProviderAvailable('codex')
+      expect(result).toBe(false)
+      expect(execFileMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('应使用对应 provider 的 version 参数', async () => {
+      execFileMock.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null) => void) => {
+        cb(null)
+      })
+
+      await isSmartProviderAvailable('claude')
+      await isSmartProviderAvailable('codex')
+
+      const claudeCallArgs = execFileMock.mock.calls[0]?.[1] as string[]
+      const codexCallArgs = execFileMock.mock.calls[1]?.[1] as string[]
+      const lastClaudeArg = claudeCallArgs[claudeCallArgs.length - 2] || claudeCallArgs[0]
+      const lastCodexArg = codexCallArgs[codexCallArgs.length - 2] || codexCallArgs[0]
+
+      expect(claudeCallArgs).toContain('--version')
+      expect(codexCallArgs).toContain('--version')
+      expect(lastClaudeArg).toMatch(/claude|--version/)
+      expect(lastCodexArg).toMatch(/codex|--version/)
+    })
+  })
+
   describe('adaptContent', () => {
     it('应替换 ~/.claude/ 为目标工具路径', () => {
       const content = '配置文件位于 ~/.claude/ 目录下'

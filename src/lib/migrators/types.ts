@@ -1,3 +1,4 @@
+import type { ConfigDirType, SmartProvider } from '../types/config'
 import type { MigrationError } from '../utils/logger'
 
 /**
@@ -6,8 +7,12 @@ import type { MigrationError } from '../utils/logger'
 export interface MigrateOptions {
   autoOverwrite: boolean
   sourceDir?: string
+  /** 配置作用域（全局/项目） */
+  scope?: ConfigDirType
   /** 启用 AI 智能适配 */
   smart?: boolean
+  /** AI 智能适配后端 */
+  smartProvider?: SmartProvider
 }
 
 /**

@@ -2,12 +2,12 @@
  * 路径工具函数
  */
 
-import type { ConfigType, ToolKey } from './config'
-import { DEFAULT_TOOL_CONFIGS } from './configs'
+import type { ConfigDirType, ConfigType, ToolKey } from './config'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { existsSync } from 'node:fs'
-import { fileExists } from './utils/file'
+import { DEFAULT_TOOL_CONFIGS } from './configs'
+import { directoryExists, fileExists } from './utils/file'
 
 /**
  * 展开家目录路径
@@ -111,8 +111,10 @@ export async function getOpenCodeMCPPath(basePath: string): Promise<string> {
   const jsonCPath = join(basePath, 'opencode.jsonc')
   const jsonPath = join(basePath, 'opencode.json')
 
-  if (await fileExists(jsonCPath)) return jsonCPath
-  if (await fileExists(jsonPath)) return jsonPath
+  if (await fileExists(jsonCPath))
+    return jsonCPath
+  if (await fileExists(jsonPath))
+    return jsonPath
 
   return jsonCPath // 默认返回 jsonc
 }
@@ -123,6 +125,50 @@ export async function getCommandsSourcePath(sourceDir: string): Promise<string> 
 
 export async function getSkillsSourcePath(sourceDir: string): Promise<string> {
   return resolve(sourceDir, '.claude/skills')
+}
+
+/**
+ * 获取项目级 Skills 源路径（优先 Claude，其次 Codex）
+ */
+export async function getProjectSkillsSourcePath(sourceDir: string): Promise<string> {
+  const priorityDirs = [
+    resolve(sourceDir, '.claude/skills'),
+    resolve(sourceDir, '.codex/skills'),
+  ]
+
+  for (const dir of priorityDirs) {
+    if (await directoryExists(dir)) {
+      return dir
+    }
+  }
+
+  return priorityDirs[0]
+}
+
+/**
+ * 获取项目级 Skills 源路径（按偏好工具优先）
+ */
+export async function getProjectSkillsSourcePathByPreference(
+  sourceDir: string,
+  prefer: 'claude' | 'codex',
+): Promise<string> {
+  const priorityDirs = prefer === 'codex'
+    ? [
+        resolve(sourceDir, '.codex/skills'),
+        resolve(sourceDir, '.claude/skills'),
+      ]
+    : [
+        resolve(sourceDir, '.claude/skills'),
+        resolve(sourceDir, '.codex/skills'),
+      ]
+
+  for (const dir of priorityDirs) {
+    if (await directoryExists(dir)) {
+      return dir
+    }
+  }
+
+  return priorityDirs[0]
 }
 
 export async function getAgentsSourcePath(sourceDir: string): Promise<string> {
@@ -137,11 +183,45 @@ export async function getRuleSourcePath(sourceDir: string): Promise<string> {
   const priorityFiles = ['CLAUDE.md', 'AGENTS.md']
   for (const fileName of priorityFiles) {
     const filePath = resolve(sourceDir, '.claude', fileName)
-    if (await fileExists(filePath)) return filePath
+    if (await fileExists(filePath))
+      return filePath
   }
   for (const fileName of priorityFiles) {
     const filePath = resolve(sourceDir, fileName)
-    if (await fileExists(filePath)) return filePath
+    if (await fileExists(filePath))
+      return filePath
   }
   return resolve(sourceDir, '.claude', 'CLAUDE.md')
+}
+
+/**
+ * 按作用域解析目标路径
+ */
+export async function resolveTargetPathByScope(
+  tool: ToolKey,
+  configType: ConfigType,
+  scope: ConfigDirType = 'global',
+  sourceDir?: string,
+): Promise<string> {
+  if (scope !== 'project' || !sourceDir) {
+    return resolveTargetPath(tool, configType)
+  }
+
+  const projectTargets: Record<string, Partial<Record<ConfigType, string>>> = {
+    claude: {
+      rules: 'CLAUDE.md',
+      skills: '.claude/skills',
+    },
+    codex: {
+      rules: 'AGENTS.md',
+      skills: '.codex/skills',
+    },
+  }
+
+  const target = projectTargets[tool]?.[configType]
+  if (target) {
+    return resolve(sourceDir, target)
+  }
+
+  return resolveTargetPath(tool, configType)
 }

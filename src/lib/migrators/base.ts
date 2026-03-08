@@ -87,7 +87,9 @@ export abstract class BaseMigrator {
    * 辅助方法：报告错误
    */
   protected reportError(message: string, error?: string): void {
-    this.logger.error(`✗ ${message}${error ? `: ${error}` : ''}`)
+    this.logger.error(`✗ ${message}${error
+      ? `: ${error}`
+      : ''}`)
   }
 
   /**

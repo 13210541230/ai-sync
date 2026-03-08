@@ -48,6 +48,11 @@ export interface SkillConfig {
   source?: string
   target?: string | string[]
   /**
+   * 使用目录链接（junction/symlink）代替复制
+   * @default false
+   */
+  useLink?: boolean
+  /**
    * 自定义内容转换逻辑，返回 null 表示跳过该文件
    */
   transform?: (content: string, fileName: string) => string | null | Promise<string | null>

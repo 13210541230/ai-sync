@@ -35,24 +35,24 @@ export class SettingsMigrator extends BaseMigrator {
       const sourceContent = await readJSONFile<any>(this.sourceDir)
       let targetConfig: any = {}
 
-      // 读取目标配置（如果存在）
+      /** 读取目标配置（如果存在） */
       if (await fileExists(targetPath)) {
         targetConfig = await readJSONFile(targetPath)
       }
 
-      // 根据配置决定是合并还是覆盖
+      /** 根据配置决定是合并还是覆盖 */
       if (toolConfig.settings.merge && !this.options.autoOverwrite) {
-        // 深度合并：保留目标文件的现有配置
+        /** 深度合并：保留目标文件的现有配置 */
         targetConfig = deepMerge(targetConfig, sourceContent)
       }
       else if (this.options.autoOverwrite) {
-        // 覆盖模式：替换关键配置项
+        /** 覆盖模式：替换关键配置项 */
         for (const key in sourceContent) {
           targetConfig[key] = sourceContent[key]
         }
       }
       else {
-        // 默认：深度合并
+        /** 默认：深度合并 */
         targetConfig = deepMerge(targetConfig, sourceContent)
       }
 

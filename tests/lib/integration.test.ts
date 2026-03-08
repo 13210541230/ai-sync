@@ -1,12 +1,13 @@
 import type { ToolKey } from '@lib/config'
 import { readFile, writeFile } from 'node:fs/promises'
+
 import { join } from 'node:path'
 import { TOOL_CONFIGS } from '@lib/config'
 import { CommandsMigrator } from '@lib/migrators/commands'
 import { MCPMigrator } from '@lib/migrators/mcp'
 import { RulesMigrator } from '@lib/migrators/rules'
 import { SkillsMigrator } from '@lib/migrators/skills'
-import { copyDirectory, ensureDirectoryExists, fileExists, removeDirectory, writeJSONFile } from '@lib/utils/file'
+import { copyDirectory, directoryExists, ensureDirectoryExists, fileExists, isSymlinkOrJunction, removeDirectory, writeJSONFile } from '@lib/utils/file'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /** 测试配置 */
@@ -313,6 +314,73 @@ describe('集成测试 (全面覆盖)', () => {
       const agentsSub = await readFile(join(projectToCodex, 'sub', 'AGENTS.md'), 'utf-8')
       expect(agentsRoot).toContain('from-claude-root')
       expect(agentsSub).toContain('from-claude-sub')
+    })
+  })
+
+  describe('skills 集中目录同步', () => {
+    it('全局 scope 迁移应先同步到 ~/.agents/skills/', async () => {
+      const centralSkillsDir = join(testTargetDir, '.agents', 'skills')
+
+      const migrator = new SkillsMigrator(
+        join(testTargetDir, '.claude', 'skills'),
+        ['cursor'],
+        { autoOverwrite: true },
+        TOOL_CONFIGS,
+      )
+      await migrator.migrate()
+
+      /** 集中目录应存在且包含源 skill 文件和子目录 */
+      expect(await directoryExists(centralSkillsDir)).toBe(true)
+      expect(await fileExists(join(centralSkillsDir, 'test-skill.md'))).toBe(true)
+      expect(await directoryExists(join(centralSkillsDir, 'test-subskill'))).toBe(true)
+    })
+
+    it('useLink:true 的工具应为每个 skill 子目录创建链接', async () => {
+      /** 临时给 cursor 设置 useLink: true 来测试链接模式 */
+      const originalSkillsConfig = { ...TOOL_CONFIGS.cursor.skills }
+      TOOL_CONFIGS.cursor.skills.useLink = true
+
+      try {
+        const migrator = new SkillsMigrator(
+          join(testTargetDir, '.claude', 'skills'),
+          ['cursor'],
+          { autoOverwrite: true },
+          TOOL_CONFIGS,
+        )
+        await migrator.migrate()
+
+        const cursorSkillsDir = join(testTargetDir, '.cursor', 'skills')
+        /** 目录本身不是链接，但子目录是链接 */
+        expect(await directoryExists(cursorSkillsDir)).toBe(true)
+        const subskillDir = join(cursorSkillsDir, 'test-subskill')
+        expect(await isSymlinkOrJunction(subskillDir)).toBe(true)
+      }
+      finally {
+        /** 恢复原始配置 */
+        TOOL_CONFIGS.cursor.skills = originalSkillsConfig
+      }
+    })
+
+    it('项目 scope 不应触发集中目录同步', async () => {
+      const centralSkillsDir = join(testTargetDir, '.agents', 'skills')
+      /** 确保集中目录不存在 */
+      await removeDirectory(centralSkillsDir)
+
+      const projectRoot = join(testTargetDir, 'project-no-central')
+      await ensureDirectoryExists(join(projectRoot, '.claude', 'skills'))
+      await ensureDirectoryExists(join(projectRoot, '.codex'))
+      await writeFile(join(projectRoot, '.claude', 'skills', 'proj-skill.md'), '# project skill')
+
+      const migrator = new SkillsMigrator(
+        projectRoot,
+        ['codex'],
+        { autoOverwrite: true, scope: 'project', sourceDir: projectRoot },
+        TOOL_CONFIGS,
+      )
+      await migrator.migrate()
+
+      /** 集中目录不应被创建（项目 scope 跳过 syncToCentral） */
+      expect(await directoryExists(centralSkillsDir)).toBe(false)
     })
   })
 })

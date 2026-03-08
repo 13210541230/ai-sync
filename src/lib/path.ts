@@ -23,6 +23,18 @@ export function expandHome(filepath: string): string {
 }
 
 /**
+ * Skills 集中存储目录
+ */
+export const CENTRAL_SKILLS_DIR = '~/.agents/skills'
+
+/**
+ * 获取展开后的集中 skills 目录绝对路径
+ */
+export function getCentralSkillsDir(): string {
+  return expandHome(CENTRAL_SKILLS_DIR)
+}
+
+/**
  * 获取工具配置路径 (统一且唯一从配置中心读取)
  * 不再包含任何 Fallback 猜测，完全由 ToolConfig 驱动
  * 注意：由于涉及数组探测，此同步版本仅返回第一个配置值
@@ -36,11 +48,15 @@ export function getToolPath(
 
   if (!typeConfig?.target) {
     /** 只有在完全没有配置时才使用极简默认值 (仅作为系统鲁棒性保底) */
-    return expandHome(`~/.${tool}/${configType === 'mcp' ? 'mcp.json' : configType}`)
+    return expandHome(`~/.${tool}/${configType === 'mcp'
+      ? 'mcp.json'
+      : configType}`)
   }
 
   const target = typeConfig.target
-  const firstPath = Array.isArray(target) ? target[0] : target
+  const firstPath = Array.isArray(target)
+    ? target[0]
+    : target
   return expandHome(firstPath)
 }
 

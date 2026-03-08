@@ -30,20 +30,20 @@ export async function mergeRules(sourceDir: string, targetFile: string): Promise
     let body = fileContent
     let frontmatter: Frontmatter = {}
 
-    // 严谨匹配 YAML Frontmatter (--- ... ---)
+    /** 严谨匹配 YAML Frontmatter (--- ... ---) */
     const frontmatterMatch = fileContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/)
     if (frontmatterMatch) {
       try {
         frontmatter = YAML.parse(frontmatterMatch[1]) as Frontmatter
         body = fileContent.substring(frontmatterMatch[0].length)
       }
-      catch (e) {
-        // 如果解析失败，尝试仅剥离标记线
+      catch {
+        /** 如果解析失败，尝试仅剥离标记线 */
       }
     }
 
     const title = frontmatter.description || file.replace('.mdc', '')
-    // 清理 body 开头的空行和可能残余的 frontmatter 标记
+    /** 清理 body 开头的空行和可能残余的 frontmatter 标记 */
     const trimmedBody = body.replace(/^---[\s\S]*?---\n/g, '').trimStart()
 
     content += `# ${title}\n\n${trimmedBody}\n\n`

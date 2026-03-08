@@ -1,6 +1,6 @@
 export * from './config'
-export * from './converters/markdown-to-toml'
 export * from './converters/adapt-rules'
+export * from './converters/markdown-to-toml'
 export * from './converters/rules-merger'
 export * from './converters/smart-adapt'
 export * from './customConfig'

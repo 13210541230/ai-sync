@@ -175,3 +175,5 @@ graph TD
 | 时间 | 操作 | 说明 |
 |------|------|------|
 | 2026-02-28 13:24:59 | 初始化架构文档 | 首次全仓扫描，生成项目愿景、架构总览、模块索引、运行开发、测试策略、编码规范、AI 使用指引 |
+| 2026-03-04 17:00:00 | 双向适配规则引擎 | 在 adapt-rules.ts 添加 claude 条目实现 codex→claude 反向替换规则；smart-adapt.ts 取消 claude 跳过逻辑；rules.ts 硬编码改用 adaptContent；测试 130→130 全通过 |
+| 2026-03-08 20:00:00 | Skills 集中管理 + 链接引用 | 子目录级 skills 集中管理（`~/.agents/skills/`）；新增 `createDirectoryLink`/`isSymlinkOrJunction`/`removeLink` 工具函数；SkillsMigrator 重写支持 syncSkillsToCentral + migratePerSkill + isSkillTransformNoOp；smart-adapt 跳过 useLink 工具的 transform 注入；新增 15 个测试，共 153 个全通过 |

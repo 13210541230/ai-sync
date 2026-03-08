@@ -347,12 +347,7 @@ export class RulesMigrator extends BaseMigrator {
     }
 
     if (tool === 'claude') {
-      return content
-        .replace(/~\/\.codex\//g, '~/.claude/')
-        .replace(/\.codex\//g, '.claude/')
-        .replace(/AGENTS\.md/g, 'CLAUDE.md')
-        .replace(/config\.toml/g, '.claude.json')
-        .replace(/\bCodex\b/g, 'Claude Code')
+      return adaptContent(content, 'claude')
     }
 
     return content

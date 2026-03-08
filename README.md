@@ -95,12 +95,12 @@ import { defineConfig } from '@jl-org/ai-sync'
 
 export default defineConfig({
   tools: {
-    // 定义一个新的工具：test-cli
+    /** 定义一个新的工具：test-cli */
     'test-cli': {
       name: 'Test CLI',
-      // 支持的配置类型
+      /** 支持的配置类型 */
       supported: ['commands', 'skills', 'rules', 'mcp'],
-      // 具体的转换逻辑
+      /** 具体的转换逻辑 */
       commands: {
         source: '.test-cli/commands',
         format: 'markdown',
@@ -109,9 +109,9 @@ export default defineConfig({
       rules: {
         source: '.test-cli/rules',
         target: '~/.test-cli/RULES.md',
-        // 开启合并模式：将多个规则合并为一个文件
+        /** 开启合并模式：将多个规则合并为一个文件 */
         merge: true,
-        // 高度自定义转换逻辑
+        /** 高度自定义转换逻辑 */
         transform: (content, fileName) => {
           return `${content}\n\n> Generated from ${fileName}`
         }

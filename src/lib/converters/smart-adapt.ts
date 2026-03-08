@@ -12,7 +12,7 @@ import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { platform, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import chalk from 'chalk'
-import { CLAUDE_SPECIFIC_PATTERNS, createReplacements, TOOL_ADAPT_MAP } from './adapt-rules'
+import { CLAUDE_SPECIFIC_PATTERNS, createReplacements, stripUnsupportedSections, TOOL_ADAPT_MAP } from './adapt-rules'
 import { mergeRules } from './rules-merger'
 
 /** 排除嵌套会话检测的环境变量 */
@@ -42,8 +42,8 @@ const PROVIDER_COMMANDS: Record<SmartProvider, string> = {
  * Layer 1: 规则引擎 - 确定性内容适配
  */
 export function adaptContent(content: string, toolKey: ToolKey): string {
+  let result = stripUnsupportedSections(content, toolKey)
   const replacements = createReplacements(toolKey)
-  let result = content
   for (const { match, replace } of replacements) {
     result = result.replace(match, replace)
   }
@@ -212,7 +212,9 @@ function adaptSingleFile(
             strResult = fileOutput.trim()
           }
         }
-        await finalize(code === 0 && strResult ? strResult : null)
+        await finalize(code === 0 && strResult
+          ? strResult
+          : null)
       })()
     })
 
@@ -363,13 +365,11 @@ export function applySmartAdaptation(
   toolsConfig: Record<string, ToolConfig>,
 ): void {
   for (const [toolKey, config] of Object.entries(toolsConfig)) {
-    if (toolKey === 'claude')
-      continue
     if (!TOOL_ADAPT_MAP[toolKey])
       continue
 
-    // Skills transform
-    if (config.skills) {
+    // Skills transform — useLink 工具跳过注入，由 SkillsMigrator 直接创建链接
+    if (config.skills && !config.skills.useLink) {
       const existingTransform = config.skills.transform
       config.skills.transform = createSkillsTransform(toolKey, existingTransform)
     }

@@ -3,8 +3,9 @@
  */
 
 import type { MigrationError } from './logger'
-import { access, chmod, constants, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { access, chmod, constants, copyFile, lstat, mkdir, readdir, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { platform } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import TOML from '@iarna/toml'
 import stripJsonComments from 'strip-json-comments'
 
@@ -129,6 +130,7 @@ export async function copyDirectory(
 
 /**
  * 获取 Markdown 文件列表（支持递归）
+ * @param dirPath 目录路径
  * @param recursive 递归扫描子目录，返回相对路径（如 `react/SKILL.md`）
  */
 export async function getMarkdownFiles(dirPath: string, recursive = false): Promise<string[]> {
@@ -205,6 +207,83 @@ export async function setExecutablePermission(filePath: string): Promise<void> {
   if (process.platform !== 'win32') {
     await chmod(filePath, 0o755)
   }
+}
+
+/**
+ * 检查路径是否为符号链接或 junction
+ */
+export async function isSymlinkOrJunction(targetPath: string): Promise<boolean> {
+  try {
+    const stats = await lstat(targetPath)
+    return stats.isSymbolicLink()
+  }
+  catch {
+    return false
+  }
+}
+
+/**
+ * 创建目录链接（Windows 用 junction，其他平台用 symlink）
+ *
+ * 若目标已是指向相同源的链接，则跳过。
+ * 若目标已存在（非链接的真实目录），根据 autoOverwrite 决定是否替换。
+ */
+export async function createDirectoryLink(
+  source: string,
+  target: string,
+  autoOverwrite: boolean = false,
+): Promise<LinkResult> {
+  if (await isSymlinkOrJunction(target)) {
+    try {
+      const existingTarget = await readlink(target)
+      if (resolve(existingTarget) === resolve(source)) {
+        return { created: false, skipped: true, error: null }
+      }
+    }
+    catch { /* readlink 失败则继续重建 */ }
+
+    await rm(target, { force: true, recursive: false })
+  }
+  else if (await directoryExists(target)) {
+    if (!autoOverwrite) {
+      return { created: false, skipped: true, error: null }
+    }
+    await rm(target, { recursive: true, force: true })
+  }
+
+  await ensureDirectoryExists(dirname(target))
+
+  try {
+    const linkType = platform() === 'win32'
+      ? 'junction'
+      : 'dir'
+    await symlink(source, target, linkType)
+    return { created: true, skipped: false, error: null }
+  }
+  catch (error) {
+    return {
+      created: false,
+      skipped: false,
+      error: error instanceof Error
+        ? error
+        : new Error(String(error)),
+    }
+  }
+}
+
+/**
+ * 移除符号链接/junction（不递归删除内容）
+ */
+export async function removeLink(linkPath: string): Promise<void> {
+  if (await isSymlinkOrJunction(linkPath)) {
+    await rm(linkPath, { force: true, recursive: false })
+  }
+}
+
+export interface LinkResult {
+  created: boolean
+  skipped: boolean
+  error: Error | null
 }
 
 export interface CopyResult {

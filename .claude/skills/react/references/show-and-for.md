@@ -15,15 +15,17 @@ function Demo() {
   useSignals()
   return (
     <>
-      <Show when={ visible } fallback={ <p>隐藏</p> }>
+      <Show when={visible} fallback={<p>隐藏</p>}>
         <p>可见内容</p>
       </Show>
       {/* 子节点为函数时可拿到 when 的值 */}
-      <Show when={ visible }>
-        {n => <p>
-          当前:
-          {n}
-        </p>}
+      <Show when={visible}>
+        {n => (
+          <p>
+            当前:
+            {n}
+          </p>
+        )}
       </Show>
     </>
   )
@@ -45,9 +47,9 @@ const items = signal([{ id: 1, name: 'A' }, { id: 2, name: 'B' }])
 function List() {
   useSignals()
   return (
-    <For each={ items } fallback={ <p>空</p> }>
+    <For each={items} fallback={<p>空</p>}>
       {item => (
-        <div key={ item.id }>{item.name}</div>
+        <div key={item.id}>{item.name}</div>
       )}
     </For>
   )

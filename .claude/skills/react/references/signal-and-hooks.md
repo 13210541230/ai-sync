@@ -16,8 +16,8 @@ function Form() {
   useSignals()
   return (
     <>
-      <input value={ firstName.value } onChange={ e => (firstName.value = e.target.value) } />
-      <input value={ lastName.value } onChange={ e => (lastName.value = e.target.value) } />
+      <input value={firstName.value} onChange={e => (firstName.value = e.target.value)} />
+      <input value={lastName.value} onChange={e => (lastName.value = e.target.value)} />
       <p>{fullName.value}</p>
     </>
   )
@@ -53,7 +53,7 @@ function Counter() {
         {' '}
         {double.value}
       </p>
-      <button onClick={ () => count.value += 1 }>+1</button>
+      <button onClick={() => count.value += 1}>+1</button>
     </>
   )
 }

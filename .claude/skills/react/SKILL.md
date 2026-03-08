@@ -6,108 +6,202 @@ description: 编写 React 时调用，提供 React 开发规范和最佳实践
 ## 项目可用工具
 ```ts
 import {
-  // 事件相关
-  useOnWinHidden, useBindWinEvent, useClickOutside, useShortCutKey, useMouse,
-  // 滚动相关
-  useScrollBottom, useScrollReachBottom,
-  // 生命周期，effect 可接收 async fn
-  useRefresh, onMounted, onUnmounted, useUpdateEffect, useCustomEffect,
-  // 性能优化
-  useMemoFn,
-  // 网络请求
-  useReq, useWatchReq,
-  // 观察器
-  useIntersectionObserver, useResizeObserver, useMutationObserver,
-  // 状态管理
-  useToggle, useThrottle, useDebounce, useWatchDebounce, useAutoSave, useWatchThrottle, useStable, useLatestRef, useGetState, useViewTransitionState,
-  // 主题相关
-  useTheme, useToggleThemeWithTransition,
-  // 订时器
-  useDefer, useTimer,
-  // Ref 相关
-  useComposedRef, useConst,
-  // 元素坐标相关
-  useElBounding, useFloatingPosition,
-  // 样式相关
-  useInsertStyle, vShow,
-  // 其他 Hooks
-  useStateWithPromise, useTextOverflow, useViewportHeight, useWorker,
-} from 'hooks' // packages/hooks
-
-import {
-  // 基础组件
-  Button, Card, Icon, Badge, CloseBtn, Arrow,
-  // 输入组件
-  Input, Textarea, ChatInput, SearchBar, MdEditor,
-  // 选择器组件
-  Select, Checkbox, Radio, Switch, Cascader, DatePicker,
-  // 表单组件
-  Form, Uploader,
-  // 弹窗组件
-  Modal, Drawer, Popover, Dropdown, ContextMenu,
-  // 反馈组件
-  Loading, Notification, EmptyState, ErrorState, Skeleton, Progress, Message,
-  // 轮播组件
+  /** 动画组件 */
+  Animate,
+  Arrow,
+  AutoScrollAnimate,
+  Badge,
+  /** 背景组件 */
+  BgPaths,
+  BlurBgImg,
+  /** 基础组件 */
+  Button,
+  Card,
+  /** 轮播组件 */
   Carousel,
-  // 布局组件
-  SplitPane, Spacer, Separator, Sidebar, CollapsibleSidebar, Toolbar,
-  // 数据展示
-  Table, Pagination, Tabs, Steps,
-  // 滚动组件
-  InfiniteScroll, VirtualScroll, VirtualDyScroll, VirtualWaterfall, SeamlessScroll, PageSwiper,
-  // 图片组件
-  ImgThumbnails, LazyImg, PreviewImg, RetryImg, ImgTransition,
-  // 动画组件
-  Animate, AutoScrollAnimate, FlipItem, TransitionItem, TextFadeIn, TextReveal, HeroEnterText,
-  // 背景组件
-  BgPaths, BlurBgImg, GridBg, DyBgc, GradientBoundary, GradientText, LiquidGlass,
+  Cascader,
+  ChatInput,
+  Checkbox,
+  CloseBtn,
+  CollapsibleSidebar,
+  ContextMenu,
+  DatePicker,
+  Drawer,
+  Dropdown,
+  DyBgc,
+  EmptyState,
+  ErrorState,
+  FlipItem,
+  /** 表单组件 */
+  Form,
+  GradientBoundary,
+  GradientText,
+  GridBg,
+  HeroEnterText,
+  Icon,
+  /** 图片组件 */
+  ImgThumbnails,
+  ImgTransition,
+  /** 滚动组件 */
+  InfiniteScroll,
+  /** 输入组件 */
+  Input,
+  LazyImg,
+  LiquidGlass,
+  /** 反馈组件 */
+  Loading,
+  MdEditor,
+  Message,
+  /** 弹窗组件 */
+  Modal,
+  Notification,
+  PageSwiper,
+  Pagination,
+  Popover,
+  PreviewImg,
+  Progress,
+  Radio,
+  RetryImg,
+  SeamlessScroll,
+  SearchBar,
+  /** 选择器组件 */
+  Select,
+  Separator,
+  Sidebar,
+  Skeleton,
+  Spacer,
+  /** 布局组件 */
+  SplitPane,
+  Steps,
+  Switch,
+  /** 数据展示 */
+  Table,
+  Tabs,
+  Textarea,
+  TextFadeIn,
+  TextReveal,
+  Toolbar,
+  TransitionItem,
+  Uploader,
+  VirtualDyScroll,
+  VirtualScroll,
+  VirtualWaterfall,
 } from 'comps' // packages/comps
 
 import {
-  // 工具函数
-  cn, addTimestampParam, extractLinks, normalizeEOL, isValidFileType, composeBase64,
-  // React 工具
-  getCompKey, filterValidComps, injectReactApp,
-  // 样式管理
-  svgStyle, createZIndexStore,
-  // Markdown
-  mdToHTML,
-  // 光标坐标
-  getCursorCoord, trackCursorCoord,
+  onMounted,
+  onUnmounted,
+  useAutoSave,
+  useBindWinEvent,
+  useClickOutside,
+  // Ref 相关
+  useComposedRef,
+  useConst,
+  useCustomEffect,
+  useDebounce,
+  /** 订时器 */
+  useDefer,
+  /** 元素坐标相关 */
+  useElBounding,
+  useFloatingPosition,
+  useGetState,
+  /** 样式相关 */
+  useInsertStyle,
+  /** 观察器 */
+  useIntersectionObserver,
+  useLatestRef,
+  /** 性能优化 */
+  useMemoFn,
+  useMouse,
+  useMutationObserver,
+  /** 事件相关 */
+  useOnWinHidden,
+  /** 生命周期，effect 可接收 async fn */
+  useRefresh,
+  /** 网络请求 */
+  useReq,
+  useResizeObserver,
+  /** 滚动相关 */
+  useScrollBottom,
+  useScrollReachBottom,
+  useShortCutKey,
+  useStable,
+  /** 其他 Hooks */
+  useStateWithPromise,
+  useTextOverflow,
+  /** 主题相关 */
+  useTheme,
+  useThrottle,
+  useTimer,
+  /** 状态管理 */
+  useToggle,
+  useToggleThemeWithTransition,
+  useUpdateEffect,
+  useViewportHeight,
+  useViewTransitionState,
+  useWatchDebounce,
+  useWatchReq,
+  useWatchThrottle,
+  useWorker,
+  vShow,
+} from 'hooks' // packages/hooks
+
+import {
+  addTimestampParam,
+  /** 工具函数 */
+  cn,
+  composeBase64,
   // Suspense
   createSuspenseData,
+  createZIndexStore,
+  extractLinks,
+  filterValidComps,
+  // React 工具
+  getCompKey,
+  /** 光标坐标 */
+  getCursorCoord,
+  injectReactApp,
+  isValidFileType,
+  // Markdown
+  mdToHTML,
+  normalizeEOL,
+  /** 样式管理 */
+  svgStyle,
+  trackCursorCoord,
 } from 'utils' // packages/utils
 ```
 
 ## 组件模板
 ```tsx
+import { forwardRef, memo } from 'react'
 import { cn } from 'utils'
-import { memo, forwardRef } from 'react'
 
 const InnerComp = forwardRef<CompRef, CompProps>((props) => {
-  const { 
+  const {
     style,
     className,
   } = props
 
-  return <div
-    className={ cn(
-      'CompContainer',
-      className
-    ) }
-    style={ style }
-  >
-  </div>
+  return (
+    <div
+      className={cn(
+        'CompContainer',
+        className
+      )}
+      style={style}
+    >
+    </div>
+  )
 })
 
 InnerComp.displayName = 'Comp'
 
 export const Comp = memo(InnerComp) as typeof InnerComp
 
-// 类型单独放 types.ts
+/** 类型单独放 types.ts */
 export type CompRef = { }
 export type CompProps = { }
-& React.PropsWithChildren<React.HTMLAttributes<HTMLElement>>
+  & React.PropsWithChildren<React.HTMLAttributes<HTMLElement>>
 ```
 
 ## 代码要求
@@ -166,29 +260,29 @@ export type CompProps = { }
 state 在 fn1 被 setState 后立即调用 fn2，fn2 读取 state 拿不到最新值（React 未立即更新）。用项目中的 `useGetState.ts` 解决，没有则告知
 
 ```tsx
-// 问题：fn2 拿不到最新 count
+/** 问题：fn2 拿不到最新 count */
 const [count, setCount] = useState(0)
 
-const fn1 = () => {
+function fn1() {
   setCount(count + 1)
   fn2() // count 仍是旧值
 }
-const fn2 = () => {
+function fn2() {
   console.log(count) // 0
 }
 
-const handleXx = () => {
+function handleXx() {
   fn1()
   fn2() // 无法获取最新值
 }
 ```
 
 ```tsx
-// 解决：useGetState
+/** 解决：useGetState */
 import { useGetState } from 'hooks'
 
 const [count, setCount] = useGetState(0)
-const fn2 = () => {
+function fn2() {
   console.log(setCount.getLatest()) // 1
 }
 ```
@@ -210,7 +304,11 @@ const fn2 = () => {
 - `<Activity>`：替代条件渲染，隐藏时保留状态，`mode="visible|hidden"`
   ```tsx
   import { Activity } from 'react'
-  <Activity mode={isActive ? 'visible' : 'hidden'}>
+
+  <Activity mode={isActive
+    ? 'visible'
+    : 'hidden'}
+  >
     <ExpensiveForm />
   </Activity>
   ```
@@ -229,9 +327,8 @@ const fn2 = () => {
       conn.on('connected', onConnected)
       conn.connect()
       return () => conn.disconnect()
-    }, [roomId]); // 无需将 onConnected 或 theme 加入依赖
-  }
-  ```
+    }, [roomId]);) // 无需将 onConnected 或 theme 加入依赖
+  }```
 
 ## 状态管理
 **Signal 可以有效解决 React 闭包陷阱等问题**

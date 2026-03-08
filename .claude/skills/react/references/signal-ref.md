@@ -14,13 +14,13 @@ function Demo() {
 
   return (
     <>
-      <div ref={ divRef }>node</div>
+      <div ref={divRef}>node</div>
       <p>
         {divRef.current
           ? 'mounted'
           : 'unmounted'}
       </p>
-      <button onClick={ () => divRef.current.textContent = `udpate at ${Date.now()}` }>
+      <button onClick={() => divRef.current.textContent = `udpate at ${Date.now()}`}>
         通过 ref 修改内容
       </button>
     </>
@@ -39,7 +39,7 @@ import { useLiveSignal } from '@preact/signals-react/utils'
 function Child({ count }: { count: number }) {
   useSignals()
   const countSignal = useLiveSignal(count)
-  return <SomeLib value={ countSignal } />
+  return <SomeLib value={countSignal} />
 }
 ```
 
